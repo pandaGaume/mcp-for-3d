@@ -190,7 +190,7 @@
     <div class="panel-title">Connection</div>
     <div class="panel-body">
       <div class="field">
-        <label for="ws-url">Tunnel provider URL</label>
+        <label for="ws-url">Tunnel provider base URL</label>
         <input type="text" id="ws-url" value="ws://localhost:3000/provider" />
       </div>
       <div class="field">
@@ -198,12 +198,12 @@
         <input type="text" id="server-name" value="Babylon Dev Scene" />
       </div>
       <div class="btn-row">
-        <button id="start-btn">&#9654; Start</button>
-        <button id="stop-btn" disabled>&#9632; Stop</button>
+        <button id="start-btn">▶ Start</button>
+        <button id="stop-btn" disabled>■ Stop</button>
       </div>
-      <div class="field" id="endpoint-field" style="display:none;margin-top:10px">
-        <label>MCP endpoint (point Inspector here)</label>
-        <input type="text" id="endpoint-display" readonly style="color:var(--green);cursor:text" />
+      <div class="field" id="mcp-endpoint-field" style="display:none;margin-top:10px">
+        <label for="mcp-endpoint">MCP endpoint (paste into MCP Inspector)</label>
+        <input type="text" id="mcp-endpoint" readonly style="color:var(--green);cursor:text" />
       </div>
     </div>
   </section>
@@ -472,14 +472,17 @@ const { McpServerBuilder } = window.McpServer;
 let server = null;
 
 document.getElementById("start-btn").addEventListener("click", async () => {
-  const providerBase = document.getElementById("ws-url").value.trim();
-  const name         = document.getElementById("server-name").value.trim() || "Babylon Dev Scene";
+  const providerBase = document.getElementById("ws-url").value.trim().replace(/\/$/, "");
+  const name = document.getElementById("server-name").value.trim() || "Babylon Dev Scene";
 
-  // Each provider registers under its own path: <providerBase>/<encodedName>
+  // Full WS URL: <providerBase>/<encodedName>  (multi-provider tunnel expects this)
   const wsUrl = `${providerBase}/${encodeURIComponent(name)}`;
 
-  // Derive the HTTP MCP endpoint the client (MCP Inspector) should use
-  const httpBase   = wsUrl.replace(/^ws(s?):\/\//, "http$1://").replace(/\/provider\//, "/");
+  // Derive the HTTP MCP endpoint from the WS URL:
+  //   ws://host/provider/<name>  →  http://host/<name>/mcp
+  const httpBase = wsUrl
+    .replace(/^ws(s?):\/\//, "http$1://")        // ws:// → http://
+    .replace(/\/provider\//, "/");               // /provider/<name> → /<name>
   const mcpHttpUrl = httpBase.endsWith("/mcp") ? httpBase : httpBase + "/mcp";
 
   log(`Connecting to ${wsUrl} …`, "dim");
@@ -510,13 +513,13 @@ document.getElementById("start-btn").addEventListener("click", async () => {
     }
     setStatus("connected");
     log(`Connected as provider — "${name}"`, "ok");
-    log(`MCP endpoint: ${mcpHttpUrl}`, "ok");
+    log(`MCP Inspector → ${mcpHttpUrl}`, "ok");
     log(`Registered ${behaviors.length} behavior(s). Waiting for MCP client…`, "dim");
     document.getElementById("start-btn").disabled = true;
     document.getElementById("stop-btn").disabled  = false;
     document.getElementById("add-mesh-btn").disabled = false;
-    document.getElementById("endpoint-display").value = mcpHttpUrl;
-    document.getElementById("endpoint-field").style.display = "";
+    document.getElementById("mcp-endpoint").value = mcpHttpUrl;
+    document.getElementById("mcp-endpoint-field").style.display = "";
   } catch (err) {
     setStatus("disconnected");
     log(`Failed to connect: ${err}`, "error");
@@ -537,7 +540,8 @@ document.getElementById("stop-btn").addEventListener("click", async () => {
     document.getElementById("start-btn").disabled = false;
     document.getElementById("stop-btn").disabled  = true;
     document.getElementById("add-mesh-btn").disabled = true;
-    document.getElementById("endpoint-field").style.display = "none";
+    document.getElementById("mcp-endpoint-field").style.display = "none";
+    document.getElementById("mcp-endpoint").value = "";
   }
 });
 
