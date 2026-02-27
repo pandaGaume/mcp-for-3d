@@ -166,6 +166,13 @@ export class WsTunnel {
     private readonly _sseSessions = new Map<string, ServerResponse>();
 
     /**
+     * Active `GET /mcp` SSE streams keyed by session id.
+     * Opened by Streamable HTTP clients (e.g. MCP Inspector) to receive
+     * server-initiated notifications as required by MCP 2025-03-26.
+     */
+    private readonly _mcpGetSessions = new Map<string, ServerResponse>();
+
+    /**
      * Tracks which sink (WS socket or SSE session) is waiting for a given
      * JSON-RPC response id, so the reply can be routed back correctly.
      */
@@ -218,6 +225,10 @@ export class WsTunnel {
             for (const res of this._sseSessions.values()) res.end();
             this._sseSessions.clear();
 
+            // Close Streamable HTTP GET streams
+            for (const res of this._mcpGetSessions.values()) res.end();
+            this._mcpGetSessions.clear();
+
             for (const client of this._clients) client.close();
             this._provider?.close();
             this._wss?.close();
@@ -252,6 +263,7 @@ export class WsTunnel {
         if (method === "GET"  && rawUrl === ssePath)           { this._handleSseConnect(req, res);    return; }
         if (method === "POST" && rawUrl === ssePath)           { this._handleMcpPost(req, res);       return; }
         if (method === "POST" && rawUrl === messagesPath)      { this._handleSseMessage(req, res);    return; }
+        if (method === "GET"  && rawUrl === mcpPath)           { this._handleMcpGetStream(req, res);  return; }
         if (method === "POST" && rawUrl === mcpPath)           { this._handleMcpPost(req, res);       return; }
         if (method === "GET"  && rawUrl === samplesIndexPath)  { this._handleSamplesIndex(res);       return; }
 
@@ -382,6 +394,32 @@ export class WsTunnel {
         });
     }
 
+    /**
+     * Handles `GET /mcp` — opens a persistent SSE stream per MCP 2025-03-26.
+     * Streamable HTTP clients (e.g. MCP Inspector) use this to receive
+     * server-initiated notifications and requests without re-polling.
+     * The session id is taken from the `Mcp-Session-Id` request header when
+     * present, so the stream is associated with the correct client session.
+     */
+    private _handleMcpGetStream(req: IncomingMessage, res: ServerResponse): void {
+        const sessionId = (req.headers["mcp-session-id"] as string | undefined) ?? randomUUID();
+
+        res.writeHead(200, {
+            "Content-Type":  "text/event-stream",
+            "Cache-Control": "no-cache, no-transform",
+            "Connection":    "keep-alive",
+            "Mcp-Session-Id": sessionId,
+        });
+        // Send an empty comment to flush headers immediately.
+        res.write(": stream open\n\n");
+
+        this._mcpGetSessions.set(sessionId, res);
+
+        req.on("close", () => {
+            this._mcpGetSessions.delete(sessionId);
+        });
+    }
+
     /** Writes one JSON-RPC message as an SSE `message` event. */
     private _sendSseEvent(res: ServerResponse, data: string): void {
         // SSE data fields must be single-line; compact the JSON just in case.
@@ -487,13 +525,16 @@ export class WsTunnel {
         }
     }
 
-    /** Sends a message to all connected clients — both WebSocket and SSE. */
+    /** Sends a message to all connected clients — WebSocket, SSE, and Streamable HTTP GET streams. */
     private _broadcast(data: string): void {
         for (const client of this._clients) {
             if (client.readyState === WebSocket.OPEN) client.send(data);
         }
         for (const sseRes of this._sseSessions.values()) {
             this._sendSseEvent(sseRes, data);
+        }
+        for (const mcpRes of this._mcpGetSessions.values()) {
+            this._sendSseEvent(mcpRes, data);
         }
     }
 

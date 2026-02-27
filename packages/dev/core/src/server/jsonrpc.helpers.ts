@@ -1,4 +1,4 @@
-import type { JsonRpcError, JsonRpcResponse, McpInitializeResult, McpResource, McpResourceContent, McpResourceTemplate, McpTool } from "../interfaces";
+import type { JsonRpcError, JsonRpcNotification, JsonRpcResponse, McpInitializeResult, McpResource, McpResourceContent, McpResourceTemplate, McpTool } from "../interfaces";
 
 // ---------------------------------------------------------------------------
 // Generic JSON-RPC 2.0 builders
@@ -101,4 +101,12 @@ export const Mcp = {
      * Pass a pre-serialized JSON string for structured data.
      */
     toolCallResult: (id: string | number, text: string): JsonRpcResponse => jsonRpcOk(id, { content: [{ type: "text", text }] }),
+
+    // ── Server-sent notifications ─────────────────────────────────────────────
+
+    /** Notifies the client that the resource list has changed (`notifications/resources/list_changed`). */
+    resourcesListChanged: (): JsonRpcNotification => ({ jsonrpc: "2.0", method: "notifications/resources/list_changed" }),
+
+    /** Notifies the client that the tool list has changed (`notifications/tools/list_changed`). */
+    toolsListChanged: (): JsonRpcNotification => ({ jsonrpc: "2.0", method: "notifications/tools/list_changed" }),
 } as const;

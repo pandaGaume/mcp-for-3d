@@ -140,6 +140,7 @@ export class McpServer implements IMcpServer, IMcpServerHandlers {
     attach<T>(target: T, behavior: IMcpBehavior<T>): IMcpBehaviorInstance {
         const instance = behavior.attach(target);
         this._instances.set(instance.uri, instance);
+        this._notifyResourcesListChanged();
         return instance;
     }
 
@@ -150,6 +151,7 @@ export class McpServer implements IMcpServer, IMcpServerHandlers {
      */
     detach(uri: string): void {
         this._instances.delete(uri);
+        this._notifyResourcesListChanged();
     }
 
     // -------------------------------------------------------------------------
@@ -445,12 +447,31 @@ export class McpServer implements IMcpServer, IMcpServerHandlers {
     // -------------------------------------------------------------------------
 
     /**
+     * Sends a `notifications/resources/list_changed` notification to the client.
+     * Only fires when the session is fully initialized and the WebSocket is open.
+     */
+    private _notifyResourcesListChanged(): void {
+        if (!this._sessionReady) return;
+        this._sendNotification(Mcp.resourcesListChanged());
+    }
+
+    /**
+     * Serializes and sends a JSON-RPC notification over the WebSocket, if open.
+     * Unlike {@link _send}, this accepts a notification (no `id`) rather than a response.
+     */
+    private _sendNotification(notification: { jsonrpc: "2.0"; method: string; params?: unknown }): void {
+        if (this._ws?.readyState === WebSocket.OPEN) {
+            this._ws.send(JSON.stringify(notification));
+        }
+    }
+
+    /**
      * Derives server capabilities from registered behavior types.
      * Any registered behavior implies both `resources` and `tools` support.
      */
     private _deriveCapabilities(): McpServerCapabilities {
         if (this._behaviors.size === 0 && this._instances.size === 0) return {};
-        return { resources: {}, tools: {} };
+        return { resources: { listChanged: true }, tools: { listChanged: true } };
     }
 
     /** Invokes a tool on a specific instance and wraps the result as a JSON-RPC response. */
