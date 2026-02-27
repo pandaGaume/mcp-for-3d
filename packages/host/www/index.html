@@ -1,89 +1,143 @@
 <!doctype html>
 <html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>MCP Tunnel Samples</title>
-  <style>
-    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; line-height: 1.4; }
-    header { display: flex; align-items: center; gap: 18px; margin-bottom: 16px; }
-    header img { width: 180px; height: 180px; object-fit: contain; }
-    h1 { margin: 0; font-size: 28px; }
-    .meta { color: #555; font-size: 14px; margin: 6px 0 0; }
-    .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin: 16px 0; }
-    button { padding: 8px 12px; font-size: 14px; cursor: pointer; }
-    ul { padding-left: 18px; }
-    li { margin: 6px 0; }
-    a { text-decoration: none; }
-    a:hover { text-decoration: underline; }
-    .err { color: #b00020; white-space: pre-wrap; margin-top: 10px; }
-    code { background: #f5f5f5; padding: 2px 4px; border-radius: 4px; }
-  </style>
-</head>
-<body>
-  <header>
-    <img src="./images/logo.png" alt="MCP Tunnel logo" />
-    <div>
-      <h1>MCP Tunnel Samples</h1>
-      <div class="meta">
-        Put pages in <code>./samples</code>. Serve this folder over HTTP and this page will list them automatically.
-      </div>
-    </div>
-  </header>
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>MCP Tunnel Samples</title>
+        <style>
+            body {
+                font-family:
+                    system-ui,
+                    -apple-system,
+                    Segoe UI,
+                    Roboto,
+                    Arial,
+                    sans-serif;
+                margin: 24px;
+                line-height: 1.4;
+            }
+            header {
+                display: flex;
+                align-items: center;
+                gap: 18px;
+                margin-bottom: 16px;
+            }
+            header img {
+                width: 180px;
+                height: 180px;
+                object-fit: contain;
+            }
+            h1 {
+                margin: 0;
+                font-size: 28px;
+            }
+            .meta {
+                color: #555;
+                font-size: 14px;
+                margin: 6px 0 0;
+            }
+            .row {
+                display: flex;
+                gap: 12px;
+                align-items: center;
+                flex-wrap: wrap;
+                margin: 16px 0;
+            }
+            button {
+                padding: 8px 12px;
+                font-size: 14px;
+                cursor: pointer;
+            }
+            ul {
+                padding-left: 18px;
+            }
+            li {
+                margin: 6px 0;
+            }
+            a {
+                text-decoration: none;
+            }
+            a:hover {
+                text-decoration: underline;
+            }
+            .err {
+                color: #b00020;
+                white-space: pre-wrap;
+                margin-top: 10px;
+            }
+            code {
+                background: #f5f5f5;
+                padding: 2px 4px;
+                border-radius: 4px;
+            }
+        </style>
+    </head>
+    <body>
+        <header>
+            <img src="./images/logo.png" alt="MCP Tunnel logo" />
+            <div>
+                <h1>MCP Tunnel Samples</h1>
+                <div class="meta">Put pages in <code>./samples</code>. Serve this folder over HTTP and this page will list them automatically.</div>
+            </div>
+        </header>
 
-  <div class="row">
-    <button id="refresh">Refresh</button>
-    <div id="status" class="meta">Loading…</div>
-  </div>
+        <div class="row">
+            <button id="refresh">Refresh</button>
+            <div id="status" class="meta">Loading…</div>
+        </div>
 
-  <div id="error" class="err"></div>
-  <ul id="list"></ul>
+        <div id="error" class="err"></div>
+        <ul id="list"></ul>
 
-  <script>
-    const statusEl = document.getElementById("status");
-    const errorEl = document.getElementById("error");
-    const listEl = document.getElementById("list");
-    const refreshBtn = document.getElementById("refresh");
+        <script>
+            const statusEl = document.getElementById("status");
+            const errorEl = document.getElementById("error");
+            const listEl = document.getElementById("list");
+            const refreshBtn = document.getElementById("refresh");
 
-    function isHtml(name) {
-      const n = String(name).toLowerCase();
-      return (n.endsWith(".html") || n.endsWith(".htm")) && n !== "index.html";
-    }
+            function isHtml(name) {
+                const n = String(name).toLowerCase();
+                return (n.endsWith(".html") || n.endsWith(".htm")) && n !== "index.html";
+            }
 
-    function render(files) {
-      listEl.innerHTML = "";
-      const pages = (files || []).filter(isHtml).sort((a, b) => a.localeCompare(b));
-      for (const name of pages) {
-        const li = document.createElement("li");
-        const a = document.createElement("a");
-        a.href = "./samples/" + encodeURI(name);
-        a.textContent = name;
-        li.appendChild(a);
-        listEl.appendChild(li);
-      }
-      statusEl.textContent = pages.length ? `Found ${pages.length} sample page(s).` : "No sample pages found.";
-    }
+            function render(files) {
+                listEl.innerHTML = "";
+                const pages = (files || []).filter(isHtml).sort((a, b) => a.localeCompare(b));
+                for (const name of pages) {
+                    const li = document.createElement("li");
+                    const a = document.createElement("a");
+                    a.href = "./samples/" + encodeURI(name);
+                    a.textContent = name;
+                    // Open in new tab
+                    a.target = "_blank";
+                    a.rel = "noopener noreferrer";
 
-    async function load() {
-      errorEl.textContent = "";
-      statusEl.textContent = "Loading…";
-      try {
-        const res = await fetch("/__samples_index__?t=" + Date.now(), { cache: "no-store" });
-        if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
-        const data = await res.json();
-        if (!data || !Array.isArray(data.files)) throw new Error("Invalid response. Expected JSON: { files: string[] }");
-        render(data.files);
-      } catch (e) {
-        statusEl.textContent = "Could not load samples list.";
-        errorEl.textContent =
-          String(e) +
-          "\n\nThis page needs an HTTP server endpoint at /__samples_index__ that returns { files: [...] }." +
-          "\nIncluded in this zip: server.mjs (a tiny Node server that provides it).";
-      }
-    }
+                    li.appendChild(a);
+                    listEl.appendChild(li);
+                }
+                statusEl.textContent = pages.length ? `Found ${pages.length} sample page(s).` : "No sample pages found.";
+            }
 
-    refreshBtn.addEventListener("click", load);
-    load();
-  </script>
-</body>
+            async function load() {
+                errorEl.textContent = "";
+                statusEl.textContent = "Loading…";
+                try {
+                    const res = await fetch("/__samples_index__?t=" + Date.now(), { cache: "no-store" });
+                    if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
+                    const data = await res.json();
+                    if (!data || !Array.isArray(data.files)) throw new Error("Invalid response. Expected JSON: { files: string[] }");
+                    render(data.files);
+                } catch (e) {
+                    statusEl.textContent = "Could not load samples list.";
+                    errorEl.textContent =
+                        String(e) +
+                        "\n\nThis page needs an HTTP server endpoint at /__samples_index__ that returns { files: [...] }." +
+                        "\nIncluded in this zip: server.mjs (a tiny Node server that provides it).";
+                }
+            }
+
+            refreshBtn.addEventListener("click", load);
+            load();
+        </script>
+    </body>
 </html>
