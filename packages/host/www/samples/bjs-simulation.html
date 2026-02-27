@@ -198,8 +198,12 @@
         <input type="text" id="server-name" value="Babylon Dev Scene" />
       </div>
       <div class="btn-row">
-        <button id="start-btn">▶ Start</button>
-        <button id="stop-btn" disabled>■ Stop</button>
+        <button id="start-btn">&#9654; Start</button>
+        <button id="stop-btn" disabled>&#9632; Stop</button>
+      </div>
+      <div class="field" id="endpoint-field" style="display:none;margin-top:10px">
+        <label>MCP endpoint (point Inspector here)</label>
+        <input type="text" id="endpoint-display" readonly style="color:var(--green);cursor:text" />
       </div>
     </div>
   </section>
@@ -468,14 +472,21 @@ const { McpServerBuilder } = window.McpServer;
 let server = null;
 
 document.getElementById("start-btn").addEventListener("click", async () => {
-  const url  = document.getElementById("ws-url").value.trim();
-  const name = document.getElementById("server-name").value.trim() || "Babylon Dev Scene";
+  const providerBase = document.getElementById("ws-url").value.trim();
+  const name         = document.getElementById("server-name").value.trim() || "Babylon Dev Scene";
 
-  log(`Connecting to ${url} …`, "dim");
+  // Each provider registers under its own path: <providerBase>/<encodedName>
+  const wsUrl = `${providerBase}/${encodeURIComponent(name)}`;
+
+  // Derive the HTTP MCP endpoint the client (MCP Inspector) should use
+  const httpBase   = wsUrl.replace(/^ws(s?):\/\//, "http$1://").replace(/\/provider\//, "/");
+  const mcpHttpUrl = httpBase.endsWith("/mcp") ? httpBase : httpBase + "/mcp";
+
+  log(`Connecting to ${wsUrl} …`, "dim");
   setStatus("connecting");
 
   const builder = new McpServerBuilder()
-    .withWsUrl(url)
+    .withWsUrl(wsUrl)
     .withName(name)
     .withInitializer({
       initialize(_clientInfo, _caps) {
@@ -499,10 +510,13 @@ document.getElementById("start-btn").addEventListener("click", async () => {
     }
     setStatus("connected");
     log(`Connected as provider — "${name}"`, "ok");
+    log(`MCP endpoint: ${mcpHttpUrl}`, "ok");
     log(`Registered ${behaviors.length} behavior(s). Waiting for MCP client…`, "dim");
     document.getElementById("start-btn").disabled = true;
     document.getElementById("stop-btn").disabled  = false;
     document.getElementById("add-mesh-btn").disabled = false;
+    document.getElementById("endpoint-display").value = mcpHttpUrl;
+    document.getElementById("endpoint-field").style.display = "";
   } catch (err) {
     setStatus("disconnected");
     log(`Failed to connect: ${err}`, "error");
@@ -523,6 +537,7 @@ document.getElementById("stop-btn").addEventListener("click", async () => {
     document.getElementById("start-btn").disabled = false;
     document.getElementById("stop-btn").disabled  = true;
     document.getElementById("add-mesh-btn").disabled = true;
+    document.getElementById("endpoint-field").style.display = "none";
   }
 });
 
