@@ -369,8 +369,18 @@
             function makeMeshBehavior(meshName) {
                 const uri = `mesh://scene/${meshName}`;
 
+                // mutable state to demonstrate tool calls having an effect when you read the resource again
+                let state = {
+                    position: { x: 0, y: 0, z: 0 },
+                    isVisible: true,
+                    scaling: { x: 1, y: 1, z: 1 },
+                };
+
                 const instance = {
                     uri,
+                    _position: { x: 0, y: 0, z: 0 },
+                    _isVisible: true,
+                    _scaling: { x: 1, y: 1, z: 1 },
                     getResource: () => ({
                         uri,
                         name: meshName,
@@ -382,9 +392,7 @@
                         text: JSON.stringify(
                             {
                                 name: meshName,
-                                position: { x: 0, y: 0, z: 0 },
-                                scaling: { x: 1, y: 1, z: 1 },
-                                isVisible: true,
+                                ...state,
                                 vertexCount: 24,
                             },
                             null,
@@ -422,10 +430,12 @@
                     callTool: async (name, args) => {
                         if (name === "set_position") {
                             log(`  ${meshName}.position ← (${args.x}, ${args.y}, ${args.z})`, "ok");
+                            state.position = { x: args.x, y: args.y, z: args.z };
                             return { applied: true, mesh: meshName, position: args };
                         }
                         if (name === "set_visibility") {
                             log(`  ${meshName}.isVisible ← ${args.visible}`, "ok");
+                            state.isVisible = args.visible;
                             return { applied: true, mesh: meshName, isVisible: args.visible };
                         }
                         throw new Error(`Unknown tool: ${name}`);
@@ -443,19 +453,28 @@
             }
 
             /** A camera behavior. */
-            function makeCameraBehavior() {
-                const uri = "camera://scene/main";
+            function makeCameraBehavior(cameraName = "main") {
+                const uri = `camera://scene/${cameraName}`;
+
+                // mutable state to demonstrate tool calls having an effect when you read the resource again
+                let state = {
+                    type: "ArcRotateCamera",
+                    alpha: 0,
+                    beta: 1.2,
+                    radius: 10,
+                };
+
                 const instance = {
                     uri,
                     getResource: () => ({
                         uri,
-                        name: "Main Camera",
+                        name: cameraName,
                         description: "Active Babylon.js camera",
                         mimeType: "application/json",
                     }),
                     readResource: async () => ({
                         uri,
-                        text: JSON.stringify({ type: "ArcRotateCamera", alpha: 0, beta: 1.2, radius: 10 }, null, 2),
+                        text: JSON.stringify({ name: cameraName, ...state }, null, 2),
                     }),
                     getTools: () => [
                         {
