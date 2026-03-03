@@ -17,6 +17,7 @@
     "lint-staged": "^15.0.0",
     "prettier": "^3.2.0",
     "rimraf": "~6.0.1",
+    "selfsigned": "^2.4.1",
     "typescript": "^5.4.0"
   },
   "lint-staged": {
@@ -43,7 +44,8 @@
     "build:all": "npm run build:dev && npm run bundle && npm run deploy:bundles",
     "build:all:dev": "npm run build:dev && npm run bundle:dev && npm run deploy:bundles",
     "server:build": "npm run build --workspace=@dev/tunnel",
-    "server:start": "npm run server:build && npm run start --workspace=@dev/tunnel"
+    "server:start": "npm run server:build && npm run start --workspace=@dev/tunnel",
+    "gen-cert": "node scripts/gen-cert.mjs"
   },
   "engines": {
     "node": ">=20.11.0 <23.0.0",

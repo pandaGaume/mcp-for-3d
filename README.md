@@ -21,7 +21,7 @@ MCP Inspector / Claude Code
 │      WsTunnel (Node.js)     │  packages/dev/tunnel
 │  HTTP + WebSocket relay     │
 └────────────┬────────────────┘
-             │  ws://localhost:3000/provider
+             │  ws://localhost:3000/provider  (wss:// when TLS is enabled)
              ▼
 ┌─────────────────────────────┐
 │  McpServer (browser page)   │  packages/host/www
@@ -150,6 +150,87 @@ The dev harness (`index.html`) opens automatically in your default browser.
 
 ---
 
+## HTTPS / TLS
+
+Some MCP clients require a secure connection (`https://` / `wss://`).  The tunnel
+supports TLS natively — no proxy needed.
+
+### 1 — Generate a self-signed certificate
+
+```bash
+npm run gen-cert
+```
+
+This creates `certs/cert.pem` and `certs/key.pem` in the repo root (the `certs/`
+folder is already gitignored).  The script prints the exact commands to start the
+server:
+
+```
+✅  Certificate written:
+     cert  →  C:\…\certs\cert.pem
+     key   →  C:\…\certs\key.pem
+
+   Start the tunnel with TLS (PowerShell):
+────────────────────────────────────────────────────────────────
+   $env:MCP_TUNNEL_TLS_CERT="C:\…\certs\cert.pem"
+   $env:MCP_TUNNEL_TLS_KEY="C:\…\certs\key.pem"
+   npm run server:start
+────────────────────────────────────────────────────────────────
+```
+
+### 2 — Start the tunnel with TLS
+
+**PowerShell:**
+```powershell
+$env:MCP_TUNNEL_TLS_CERT="certs\cert.pem"
+$env:MCP_TUNNEL_TLS_KEY="certs\key.pem"
+npm run server:start
+```
+
+**Bash / Git Bash:**
+```bash
+MCP_TUNNEL_TLS_CERT=certs/cert.pem MCP_TUNNEL_TLS_KEY=certs/key.pem npm run server:start
+```
+
+The startup banner switches to `https://` and `wss://` automatically:
+
+```
+⚙️  MCP for Babylon — multi-provider tunnel started (TLS)
+────────────────────────────────────────────────────────────────
+📡  Provider WebSocket   wss://localhost:3000/provider/<serverName>
+🔌  MCP Inspector (HTTP) https://localhost:3000/<serverName>/mcp
+📺  Claude Code   (SSE)  https://localhost:3000/<serverName>/sse
+```
+
+### 3 — Connect your MCP client over HTTPS
+
+Replace `http://` with `https://` in all client URLs.  For Claude Code:
+
+```json
+{
+  "mcpServers": {
+    "babylon": {
+      "url": "https://localhost:3000/<serverName>/sse"
+    }
+  }
+}
+```
+
+> **Self-signed certificate warning** — browsers show an "untrusted certificate"
+> warning the first time you open `https://localhost:3000/`.
+> Click **Advanced → Proceed to localhost**.
+> MCP clients (Claude Code, MCP Inspector) typically skip certificate validation
+> for `localhost` and do not show this warning.
+
+> **Production certificates** — for a real domain, point the env vars at your
+> Let's Encrypt files:
+> ```
+> MCP_TUNNEL_TLS_CERT=/etc/letsencrypt/live/example.com/fullchain.pem
+> MCP_TUNNEL_TLS_KEY=/etc/letsencrypt/live/example.com/privkey.pem
+> ```
+
+---
+
 ## Connecting the browser provider
 
 1. The browser opens the **dev harness** at `http://localhost:3000/`.
@@ -185,9 +266,9 @@ MCP Inspector prints its own URL, e.g.:
 
 1. Open MCP Inspector in your browser.
 2. In the **Transport** dropdown, select **Streamable HTTP**.
-3. Set the URL to:
+3. Set the URL to (replace `<serverName>` with the name used in the browser page):
    ```
-   http://localhost:3000/mcp
+   http://localhost:3000/<serverName>/mcp
    ```
 4. Click **Connect**.
 
@@ -230,15 +311,16 @@ The browser log panel will show:
 
 Add the tunnel as an MCP server in your Claude Code settings.
 
-### Option A — SSE transport (2024-11-05, recommended for Claude Code)
+Edit `~/.claude/settings.json` (or open **Settings → MCP Servers**), replacing
+`<serverName>` with the name passed to `McpServerBuilder.withName()` in your page:
 
-Edit `~/.claude/settings.json` (or open **Settings → MCP Servers**):
+### Option A — SSE transport (2024-11-05, recommended for Claude Code)
 
 ```json
 {
   "mcpServers": {
     "babylon": {
-      "url": "http://localhost:3000/sse"
+      "url": "http://localhost:3000/<serverName>/sse"
     }
   }
 }
@@ -250,7 +332,21 @@ Edit `~/.claude/settings.json` (or open **Settings → MCP Servers**):
 {
   "mcpServers": {
     "babylon": {
-      "url": "http://localhost:3000/mcp"
+      "url": "http://localhost:3000/<serverName>/mcp"
+    }
+  }
+}
+```
+
+### With HTTPS (TLS enabled)
+
+Replace `http://` with `https://` in both options above:
+
+```json
+{
+  "mcpServers": {
+    "babylon": {
+      "url": "https://localhost:3000/<serverName>/sse"
     }
   }
 }
@@ -262,6 +358,47 @@ status bar.  You can now ask Claude to inspect or move scene objects:
 > "List all the resources available in the Babylon scene."
 > "Move BoxMesh to position (3, 0, -2)."
 > "Smoothly animate the camera to look at the sphere over 2 seconds."
+
+---
+
+## Light tools reference
+
+The `@dev/babylon` package exposes a full set of light management tools.
+All colours use `{ r, g, b }` objects with channels in `[0, 1]`.
+Every tool takes a `uri` argument — either the namespace URI
+(`babylon://light`) for scene-level and create tools, or an instance URI
+(`babylon://light/<name>`) for per-light tools.
+
+> **Protected lights** — lights that existed in the Babylon.js scene before the
+> MCP server started cannot be removed via `light_remove`.  Only lights created
+> through `light_create` are disposable.
+
+### Per-light tools
+
+| Tool | Applies to | Description |
+|------|-----------|-------------|
+| `light_create` | — | Creates a new light (`point`, `directional`, `spot`, `hemispheric`). Returns the new URI. |
+| `light_remove` | all | Removes and disposes a light created by the MCP server. |
+| `light_set_enabled` | all | Enables or disables a light without removing it. |
+| `light_set_intensity` | all | Sets the brightness multiplier (`>= 0`; default 1). |
+| `light_set_diffuse_color` | all | Sets the main emitted colour. |
+| `light_set_specular_color` | all | Sets the highlight (specular) colour. |
+| `light_set_position` | point, spot, directional | Sets the world-space origin. For directional lights this only affects the shadow frustum. |
+| `light_set_direction` | directional, spot, hemispheric | Sets the direction vector (normalised internally). |
+| `light_set_target` | spot, directional | Aims the light at a world-space point (`direction = normalize(target − position)`). |
+| `light_set_range` | point, spot | Sets the effective range in world units. |
+| `light_spot_set_angle` | spot | Sets the cone half-angle in degrees `(0, 90)`. |
+| `light_spot_set_exponent` | spot | Sets the falloff exponent toward the cone axis. |
+| `light_hemi_set_ground_color` | hemispheric | Sets the bottom-hemisphere (ground) colour. |
+| `light_update` | all | Batch-patches multiple properties in one call; inapplicable fields are silently ignored. |
+
+### Scene ambient tools
+
+| Tool | Description |
+|------|-------------|
+| `scene_get_ambient` | Returns the current ambient colour and enabled state. |
+| `scene_set_ambient_color` | Sets `scene.ambientColor` (affects all materials using ambient). |
+| `scene_set_ambient_enabled` | Disables ambient (sets black) or re-enables it (restores previous colour). |
 
 ---
 
@@ -326,6 +463,8 @@ All variables are optional; the defaults work out-of-the-box for a local dev set
 | `MCP_TUNNEL_WWW_DIR` | `packages/host/www` | Directory served as the dev harness |
 | `MCP_TUNNEL_BUNDLE_DIR` | `packages/dev/core/bundle` | Directory served under `/bundle/` |
 | `MCP_TUNNEL_NO_OPEN` | _(unset)_ | Set to any value to skip auto-opening browser |
+| `MCP_TUNNEL_TLS_CERT` | _(unset)_ | Path to PEM certificate file — enables HTTPS/WSS |
+| `MCP_TUNNEL_TLS_KEY` | _(unset)_ | Path to PEM private-key file — enables HTTPS/WSS |
 
 ---
 
@@ -342,9 +481,9 @@ mcp-for-babylon/
 │   │   │   └── bundle/               webpack output (mcp-server.js)
 │   │   ├── babylon/        @dev/babylon — Babylon.js behaviors & adapters (TypeScript → UMD)
 │   │   │   ├── src/
-│   │   │   │   ├── adapters/         McpCameraAdapter (tool dispatch + resource read)
-│   │   │   │   ├── behaviours/       McpCameraBehavior (tool & resource schema)
-│   │   │   │   └── states/           Camera / math state types
+│   │   │   │   ├── adapters/         McpCameraAdapter, McpLightAdapter
+│   │   │   │   ├── behaviours/       McpCameraBehavior, McpLightBehavior
+│   │   │   │   └── states/           Camera / light / math state types
 │   │   │   └── bundle/               webpack output (mcp-babylon.js)
 │   │   ├── tunnel/         @dev/tunnel — WebSocket/HTTP relay (Node.js)
 │   │   │   └── src/
@@ -355,11 +494,12 @@ mcp-for-babylon/
 │   └── host/
 │       └── www/            Dev harness (plain HTML + UMD bundles)
 │           ├── bundle/     Deployed bundles (output of npm run deploy:bundles)
-│           ├── samples/    Ready-to-use sample scenes (e.g. babylon-camera.html)
+│           ├── samples/    Ready-to-use sample scenes (babylon-camera.html, babylon-light.html, …)
 │           ├── templates/  Reusable HTML templates
 │           └── index.html  Browser MCP provider + mock Babylon.js behaviors
 ├── scripts/
-│   └── deploy-bundles.mjs  Copies bundle output into www/bundle/
+│   ├── deploy-bundles.mjs  Copies bundle output into www/bundle/
+│   └── gen-cert.mjs        Generates a self-signed TLS certificate (→ certs/)
 └── package.json            Monorepo root (npm workspaces)
 ```
 
@@ -380,10 +520,13 @@ mcp-for-babylon/
 
 | Transport | Endpoint | Spec |
 |-----------|----------|------|
-| Streamable HTTP | `POST /mcp` | MCP 2025-03-26 |
-| SSE stream | `GET /sse` | MCP 2024-11-05 |
-| SSE messages | `POST /messages?sessionId=…` | MCP 2024-11-05 |
-| Raw WebSocket | `ws://localhost:3000/` | Internal / testing |
+| Streamable HTTP | `POST /<serverName>/mcp` | MCP 2025-03-26 |
+| SSE stream | `GET /<serverName>/sse` | MCP 2024-11-05 |
+| SSE messages | `POST /<serverName>/messages?sessionId=…` | MCP 2024-11-05 |
+| Raw WebSocket | `ws://localhost:3000/<serverName>` | Internal / testing |
+
+All transports are available over HTTPS/WSS when `MCP_TUNNEL_TLS_CERT` and
+`MCP_TUNNEL_TLS_KEY` are set (see [HTTPS / TLS](#https--tls)).
 
 ---
 
@@ -401,3 +544,4 @@ mcp-for-babylon/
 | `npm run build:all:dev` | Full development build: compile + bundle:dev + deploy |
 | `npm run server:build` | Compile tunnel TypeScript |
 | `npm run server:start` | Build + start the tunnel server |
+| `npm run gen-cert` | Generate a self-signed TLS certificate into `certs/` |
