@@ -29,7 +29,7 @@ MCP Inspector / Claude Code
 └─────────────────────────────┘
 ```
 
-The **browser page** runs an `McpServer` instance (UMD bundle) that registers
+The **browser page** runs an `McpServer` instance (UMD bundles) that registers
 Babylon.js scene objects as MCP resources with callable tools.  The **tunnel**
 bridges HTTP/SSE MCP clients to the browser's WebSocket connection.
 
@@ -39,7 +39,7 @@ bridges HTTP/SSE MCP clients to the browser's WebSocket connection.
 
 | Tool    | Version    |
 |---------|------------|
-| Node.js | ≥ 20.11.0  |
+| Node.js | ≥ 20.11.0 < 23.0.0 |
 | npm     | ≥ 8.0.0    |
 | Browser | Any modern (Chrome, Edge, Firefox) |
 
@@ -64,11 +64,25 @@ npm install
 
 ## Build
 
-Two artefacts must be built before you can run the project:
+Three steps are required before you can run the project:
 
-### 1 — UMD browser bundle (`mcp-server.js`)
+### 1 — Compile TypeScript
 
-The Babylon.js page loads this bundle.  It is produced by webpack:
+Compiles all packages (`@dev/core`, `@dev/babylon`, `@dev/tunnel`) to their `dist/` directories:
+
+```bash
+npm run build:dev
+```
+
+For watch mode (auto-recompile on source changes):
+
+```bash
+npm run build:watch
+```
+
+### 2 — UMD browser bundles
+
+Produces webpack bundles for both `@dev/core` and `@dev/babylon`:
 
 ```bash
 # Production build (minified)
@@ -81,24 +95,31 @@ npm run bundle:dev
 npm run bundle:watch
 ```
 
-Output: `packages/dev/core/bundle/mcp-server.js`
+Outputs:
+- `packages/dev/core/bundle/mcp-server.js`
+- `packages/dev/babylon/bundle/mcp-babylon.js`
 
-### 2 — Tunnel server (Node.js)
+### 3 — Deploy bundles to the dev harness
+
+Copies all bundle files into `packages/host/www/bundle/`, which is the directory
+served by the tunnel at `/bundle/`:
 
 ```bash
-npm run server:build
+npm run deploy:bundles
 ```
-
-Output: `packages/dev/tunnel/dist/`
 
 ### Build everything at once
 
 ```bash
-npm run bundle:dev && npm run server:build
+# Development (recommended during active work)
+npm run build:all:dev
+
+# Production (minified)
+npm run build:all
 ```
 
-> **Tip — after changing TypeScript source in `packages/dev/core/src/`**,
-> always re-run `npm run bundle:dev` so the browser picks up your changes.
+> **Tip — after changing TypeScript source**, always re-run `npm run build:all:dev`
+> so the browser picks up your changes.
 
 ---
 
@@ -138,7 +159,7 @@ The dev harness (`index.html`) opens automatically in your default browser.
 3. Click **▶ Start**.
 4. The status badge changes to **Connected**.
 
-The harness registers three mock behaviors (BoxMesh, SphereMesh, Main Camera).
+The harness registers mock behaviors (BoxMesh, SphereMesh, Main Camera).
 The left panel lists all registered resources and tools.
 
 ---
@@ -179,9 +200,9 @@ MCP Inspector prints its own URL, e.g.:
 | Tab | MCP method | What you see |
 |-----|-----------|--------------|
 | **Resources** → List | `resources/list` | `mesh://scene/BoxMesh`, `mesh://scene/SphereMesh`, `camera://scene/main` |
-| **Resources** → Templates | `resources/templates/list` | `mesh://scene/{meshName}`, `camera://scene/{cameraName}` |
+| **Resources** → Templates | `resources/templates/list` | `mesh://scene/{meshName}`, `camera://scene/{cameraId}` |
 | **Resources** → Read | `resources/read` | JSON state for a specific mesh or camera |
-| **Tools** → List | `tools/list` | `set_position`, `set_visibility`, `set_target` |
+| **Tools** → List | `tools/list` | mesh tools + camera tools (see below) |
 | **Tools** → Call | `tools/call` | Execute a tool on a specific instance via its URI |
 
 ### Example tool call — move BoxMesh
@@ -240,6 +261,54 @@ status bar.  You can now ask Claude to inspect or move scene objects:
 
 > "List all the resources available in the Babylon scene."
 > "Move BoxMesh to position (3, 0, -2)."
+> "Smoothly animate the camera to look at the sphere over 2 seconds."
+
+---
+
+## Camera tools reference
+
+The `@dev/babylon` package exposes a rich set of camera tools.  All coordinates
+are world-space, **right-handed, y-axis up**.  Every tool requires a `uri`
+argument (e.g. `babylon://camera/MyCamera`) to identify the target camera.
+
+### Immediate tools
+
+| Tool | Description |
+|------|-------------|
+| `camera_set_target` | Set the look-at point (`TargetCamera.setTarget`). |
+| `camera_set_position` | Teleport the camera to an absolute world-space position. |
+| `camera_look_at` | Move the camera and set its look-at target in one call. |
+| `camera_orbit` | Rotate around the current target by `deltaAlpha` / `deltaBeta` (degrees). |
+| `camera_set_fov` | Set the vertical field of view (degrees or radians). |
+| `camera_zoom` | Relative zoom: `factor < 1` zooms in, `factor > 1` zooms out. |
+| `camera_set_projection` | Switch between `"perspective"` and `"orthographic"` projection. |
+| `camera_dolly` | Push/pull the camera along the view axis (affects parallax & DoF). |
+| `camera_pan` | Slide the camera and target together perpendicular to the view axis. |
+| `camera_lock` | Detach user input — cinematic lock. |
+| `camera_unlock` | Re-attach user input after a cinematic lock. |
+| `camera_snapshot` | Capture a frame as a base64-encoded PNG (any resolution). |
+
+### Animation tools
+
+| Tool | Description |
+|------|-------------|
+| `camera_animate_to` | Smoothly fly to a new position, target, and/or FOV over time. |
+| `camera_animate_orbit` | Smooth orbit sweep; supports continuous `loop` mode. |
+| `camera_follow_path` | Move the camera through an ordered sequence of waypoints. |
+| `camera_shake` | Procedural trauma shake with intensity, duration, and frequency. |
+| `camera_stop_animation` | Stop any currently running animation, freezing the camera in place. |
+
+#### Easing format
+
+Animation tools accept an optional `easing` string:
+
+```
+'<type>'          →  e.g. 'sine'           (defaults to inout mode)
+'<type>.<mode>'   →  e.g. 'elastic.out'
+```
+
+**Types:** `linear` | `sine` | `quad` | `cubic` | `circle` | `expo` | `back` | `bounce` | `elastic`
+**Modes:** `in` | `out` | `inout` (default)
 
 ---
 
@@ -271,6 +340,12 @@ mcp-for-babylon/
 │   │   │   │   ├── interfaces/       Public TypeScript interfaces
 │   │   │   │   └── server/           McpServer, McpServerBuilder, JSON-RPC helpers
 │   │   │   └── bundle/               webpack output (mcp-server.js)
+│   │   ├── babylon/        @dev/babylon — Babylon.js behaviors & adapters (TypeScript → UMD)
+│   │   │   ├── src/
+│   │   │   │   ├── adapters/         McpCameraAdapter (tool dispatch + resource read)
+│   │   │   │   ├── behaviours/       McpCameraBehavior (tool & resource schema)
+│   │   │   │   └── states/           Camera / math state types
+│   │   │   └── bundle/               webpack output (mcp-babylon.js)
 │   │   ├── tunnel/         @dev/tunnel — WebSocket/HTTP relay (Node.js)
 │   │   │   └── src/
 │   │   │       ├── ws.tunnel.ts      WsTunnel class
@@ -278,8 +353,13 @@ mcp-for-babylon/
 │   │   │       └── bin.ts            CLI entry point
 │   │   └── tools/          @dev/tools — shared build utilities
 │   └── host/
-│       └── www/            Dev harness (plain HTML + UMD bundle)
+│       └── www/            Dev harness (plain HTML + UMD bundles)
+│           ├── bundle/     Deployed bundles (output of npm run deploy:bundles)
+│           ├── samples/    Ready-to-use sample scenes (e.g. babylon-camera.html)
+│           ├── templates/  Reusable HTML templates
 │           └── index.html  Browser MCP provider + mock Babylon.js behaviors
+├── scripts/
+│   └── deploy-bundles.mjs  Copies bundle output into www/bundle/
 └── package.json            Monorepo root (npm workspaces)
 ```
 
@@ -289,8 +369,9 @@ mcp-for-babylon/
 |------|-------------|
 | **Behavior** (`IMcpBehavior<T>`) | Capability template for a type of object (mesh, light, camera). Registered once per type. |
 | **Instance** (`IMcpBehaviorInstance`) | Live wrapper around one specific object. Exposes it as a resource + tool executor. |
-| **Namespace** | Short identifier (e.g. `"mesh"`) that groups tools and URI templates per behavior type. |
-| **URI template** | RFC 6570 pattern (e.g. `mesh://scene/{meshName}`) advertised via `resources/templates/list`. |
+| **Adapter** (`IMcpBehaviorAdapter`) | Babylon.js-specific implementation that reads scene state and dispatches tool calls. |
+| **Namespace** | Short identifier (e.g. `"camera"`) that groups tools and URI templates per behavior type. |
+| **URI template** | RFC 6570 pattern (e.g. `babylon://camera/{cameraId}`) advertised via `resources/templates/list`. |
 | **`uri` argument** | Required tool argument that routes a call to the correct instance (fast path). |
 
 ---
@@ -310,8 +391,13 @@ mcp-for-babylon/
 
 | Script | Description |
 |--------|-------------|
-| `npm run bundle` | Production webpack bundle |
-| `npm run bundle:dev` | Development webpack bundle (readable) |
-| `npm run bundle:watch` | Watch + auto-rebuild bundle |
+| `npm run build:dev` | Compile all TypeScript packages to `dist/` |
+| `npm run build:watch` | Compile TypeScript in watch mode |
+| `npm run bundle` | Production webpack bundles (core + babylon) |
+| `npm run bundle:dev` | Development webpack bundles (readable, with source maps) |
+| `npm run bundle:watch` | Watch + auto-rebuild core bundle |
+| `npm run deploy:bundles` | Copy bundle files into `packages/host/www/bundle/` |
+| `npm run build:all` | Full production build: compile + bundle + deploy |
+| `npm run build:all:dev` | Full development build: compile + bundle:dev + deploy |
 | `npm run server:build` | Compile tunnel TypeScript |
 | `npm run server:start` | Build + start the tunnel server |
