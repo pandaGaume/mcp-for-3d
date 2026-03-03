@@ -97,10 +97,7 @@
             }
 
             function escHtml(s) {
-                return String(s)
-                    .replace(/&/g, "&amp;")
-                    .replace(/</g, "&lt;")
-                    .replace(/>/g, "&gt;");
+                return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
             }
 
             // =========================================================
@@ -110,11 +107,12 @@
 
             function setStatus(state) {
                 badgeEl.className = `badge ${state}`;
-                badgeEl.textContent = {
-                    disconnected: "Disconnected",
-                    connecting:   "Connecting…",
-                    connected:    "Connected",
-                }[state] ?? state;
+                badgeEl.textContent =
+                    {
+                        disconnected: "Disconnected",
+                        connecting: "Connecting…",
+                        connected: "Connected",
+                    }[state] ?? state;
             }
 
             // =========================================================
@@ -122,13 +120,13 @@
             // =========================================================
             const canvas = document.getElementById("renderCanvas");
             const engine = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer: true, stencil: true });
-            const scene  = new BABYLON.Scene(engine);
+            const scene = new BABYLON.Scene(engine);
 
             engine.runRenderLoop(() => scene.render());
             window.addEventListener("resize", () => engine.resize());
 
             // =========================================================
-            // ✏️  Fill in your scene here
+            // ✏️  Fill in the scene here
             // =========================================================
 
             /**
@@ -138,34 +136,21 @@
              * @param {BABYLON.Scene} scene
              */
             function createScene(scene) {
-
                 // ── Lighting ─────────────────────────────────────────────
                 // Soft ambient from above
-                const hemi = new BABYLON.HemisphericLight(
-                    "hemi",
-                    new BABYLON.Vector3(0, 1, 0),
-                    scene
-                );
+                const hemi = new BABYLON.HemisphericLight("hemi", new BABYLON.Vector3(0, 1, 0), scene);
                 hemi.intensity = 0.65;
 
                 // Directional sun for clear sphere shading
-                const sun = new BABYLON.DirectionalLight(
-                    "sun",
-                    new BABYLON.Vector3(-1, -2, -1).normalize(),
-                    scene
-                );
+                const sun = new BABYLON.DirectionalLight("sun", new BABYLON.Vector3(-1, -2, -1).normalize(), scene);
                 sun.intensity = 0.7;
 
                 // ── Ground ───────────────────────────────────────────────
-                const ground = BABYLON.MeshBuilder.CreateGround(
-                    "ground",
-                    { width: 20, height: 20 },
-                    scene
-                );
+                const ground = BABYLON.MeshBuilder.CreateGround("ground", { width: 20, height: 20 }, scene);
                 const gMat = new BABYLON.StandardMaterial("groundMat", scene);
-                gMat.diffuseColor  = new BABYLON.Color3(0.13, 0.13, 0.20);
+                gMat.diffuseColor = new BABYLON.Color3(0.13, 0.13, 0.2);
                 gMat.specularColor = BABYLON.Color3.Black();
-                ground.material    = gMat;
+                ground.material = gMat;
 
                 // ── 12 clock-face spheres (0 = noon, 1 … 11 clockwise) ──
                 //
@@ -178,45 +163,38 @@
                 //   angle(h) = h/12 × 2π − π/2
                 //
                 const CLOCK_RADIUS = 5; // circle radius (units)
-                const SPHERE_R     = 1; // sphere radius  (units)
+                const SPHERE_R = 1; // sphere radius  (units)
 
                 // 12 visually distinct colors, one per hour
                 const COLORS = [
-                    new BABYLON.Color3(1.00, 0.20, 0.20), //  0  noon    — red
-                    new BABYLON.Color3(1.00, 0.50, 0.10), //  1          — orange
-                    new BABYLON.Color3(1.00, 0.85, 0.10), //  2          — amber
-                    new BABYLON.Color3(0.55, 0.90, 0.10), //  3          — yellow-green
-                    new BABYLON.Color3(0.10, 0.80, 0.20), //  4          — green
-                    new BABYLON.Color3(0.10, 0.90, 0.70), //  5          — teal
-                    new BABYLON.Color3(0.10, 0.65, 1.00), //  6          — sky-blue
-                    new BABYLON.Color3(0.10, 0.30, 1.00), //  7          — blue
-                    new BABYLON.Color3(0.50, 0.10, 1.00), //  8          — violet
-                    new BABYLON.Color3(0.85, 0.10, 1.00), //  9          — purple
-                    new BABYLON.Color3(1.00, 0.10, 0.70), // 10          — magenta
-                    new BABYLON.Color3(1.00, 0.10, 0.40), // 11          — rose
+                    new BABYLON.Color3(1.0, 0.2, 0.2), //  0  noon    — red
+                    new BABYLON.Color3(1.0, 0.5, 0.1), //  1          — orange
+                    new BABYLON.Color3(1.0, 0.85, 0.1), //  2          — amber
+                    new BABYLON.Color3(0.55, 0.9, 0.1), //  3          — yellow-green
+                    new BABYLON.Color3(0.1, 0.8, 0.2), //  4          — green
+                    new BABYLON.Color3(0.1, 0.9, 0.7), //  5          — teal
+                    new BABYLON.Color3(0.1, 0.65, 1.0), //  6          — sky-blue
+                    new BABYLON.Color3(0.1, 0.3, 1.0), //  7          — blue
+                    new BABYLON.Color3(0.5, 0.1, 1.0), //  8          — violet
+                    new BABYLON.Color3(0.85, 0.1, 1.0), //  9          — purple
+                    new BABYLON.Color3(1.0, 0.1, 0.7), // 10          — magenta
+                    new BABYLON.Color3(1.0, 0.1, 0.4), // 11          — rose
                 ];
 
                 for (let h = 0; h < 12; h++) {
                     const angle = (h / 12) * 2 * Math.PI - Math.PI / 2;
 
-                    const sphere = BABYLON.MeshBuilder.CreateSphere(
-                        String(h),
-                        { diameter: SPHERE_R * 2, segments: 16 },
-                        scene
-                    );
+                    const sphere = BABYLON.MeshBuilder.CreateSphere(String(h), { diameter: SPHERE_R * 2, segments: 16 }, scene);
                     sphere.position.x = CLOCK_RADIUS * Math.cos(angle);
-                    sphere.position.y = SPHERE_R;  // centre at y=1, bottom rests on y=0
+                    sphere.position.y = SPHERE_R; // centre at y=1, bottom rests on y=0
                     sphere.position.z = CLOCK_RADIUS * Math.sin(angle);
 
                     const mat = new BABYLON.StandardMaterial(`mat${h}`, scene);
-                    mat.diffuseColor  = COLORS[h];
+                    mat.diffuseColor = COLORS[h];
                     mat.specularColor = COLORS[h].scale(0.3);
-                    sphere.material   = mat;
+                    sphere.material = mat;
 
-                    log(
-                        `Sphere "${h}" → (${sphere.position.x.toFixed(2)}, 1.00, ${sphere.position.z.toFixed(2)}) Left handed Y upward.`,
-                        "dim"
-                    );
+                    log(`Sphere "${h}" → (${sphere.position.x.toFixed(2)}, 1.00, ${sphere.position.z.toFixed(2)}) Left handed Y upward.`, "dim");
                 }
 
                 // ── ArcRotateCamera — exactly at (0, 5, 0) looking at noon ──
@@ -234,14 +212,14 @@
                 //     α = π/2                     (sin α = 1, cos α = 0)
                 //
                 const noonTarget = new BABYLON.Vector3(0, SPHERE_R, -CLOCK_RADIUS);
-                const camRadius  = Math.sqrt(CLOCK_RADIUS * CLOCK_RADIUS + 16); // √(5²+4²) = √41
-                const camBeta    = Math.acos(4 / camRadius);                    // 4 = camY − targetY
+                const camRadius = Math.sqrt(CLOCK_RADIUS * CLOCK_RADIUS + 16); // √(5²+4²) = √41
+                const camBeta = Math.acos(4 / camRadius); // 4 = camY − targetY
 
                 const camera = new BABYLON.ArcRotateCamera(
                     "camera",
                     Math.PI / 2, // α = π/2 → camera sits behind noon, on the +Z side
-                    camBeta,     // β ≈ 51.3° → places camera at y = 5
-                    camRadius,   // radius ≈ 6.40
+                    camBeta, // β ≈ 51.3° → places camera at y = 5
+                    camRadius, // radius ≈ 6.40
                     noonTarget,
                     scene
                 );
@@ -276,26 +254,24 @@
                 // McpCameraAdapter indexes all cameras in the scene, keeps the index
                 // in sync via onNewCameraAddedObservable / onCameraRemovedObservable,
                 // and handles readResourceAsync / executeToolAsync at runtime.
-                const adapter = new McpCameraAdapter(scene);
+                const cam_adapter = new McpCameraAdapter(scene);
 
                 // McpCameraBehavior owns the MCP-protocol identity:
                 //   - resource  : babylon://camera          (list all cameras)
                 //   - template  : babylon://camera/{cameraId}  (single camera state)
                 //   - tool      : camera.setTarget          (move the look-at point)
-                const behavior = new McpCameraBehavior(adapter);
+                const cam_behavior = new McpCameraBehavior(cam_adapter);
 
-                return behavior;
+                return cam_behavior;
             }
-            
+
             document.getElementById("start-btn").addEventListener("click", async () => {
                 const providerBase = document.getElementById("ws-url").value.trim().replace(/\/$/, "");
                 const name = document.getElementById("server-name").value.trim() || "babylon-template";
 
                 const wsUrl = `${providerBase}/${encodeURIComponent(name)}`;
 
-                const httpBase = wsUrl
-                    .replace(/^ws(s?):\/\//, "http$1://")
-                    .replace(/\/provider\//, "/");
+                const httpBase = wsUrl.replace(/^ws(s?):\/\//, "http$1://").replace(/\/provider\//, "/");
                 const mcpHttpUrl = httpBase.endsWith("/mcp") ? httpBase : httpBase + "/mcp";
 
                 log(`Connecting to ${wsUrl} …`, "dim");
@@ -309,12 +285,22 @@
                             return {
                                 protocolVersion: "2024-11-05",
                                 serverInfo: { name, version: "0.0.0" },
+                                instructions:
+                                    "You are connected to a LIVE, running Babylon.js 3D scene. " +
+                                    "This MCP server exposes real-time camera controls. " +
+                                    "ALWAYS use the provided MCP tools to perform actions on the scene — " +
+                                    "do NOT write, suggest, or modify any HTML or JavaScript code. " +
+                                    "Workflow: (1) call the 'resources/read' MCP method with URI 'babylon://camera' " +
+                                    "to list the cameras currently in the scene and obtain their URIs, " +
+                                    "(2) pass the chosen URI as the 'uri' argument when calling any camera tool. " +
+                                    "Tool calls take effect immediately on the running scene — " +
+                                    "no compilation, no reload, no code editing required.",
                             };
                         },
                     });
                 const behaviours = createBehaviour(scene);
-                if( behaviours) {
-                    if (Array.isArray(behaviours)){
+                if (behaviours) {
+                    if (Array.isArray(behaviours)) {
                         builder.register(...behaviours);
                     } else {
                         builder.register(behaviours);
