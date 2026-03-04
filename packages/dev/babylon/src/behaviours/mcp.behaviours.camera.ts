@@ -62,6 +62,16 @@ export class McpCameraBehavior extends McpBehavior {
     public static readonly CameraStopAnimationFn = "camera_stop_animation";
 
     // -------------------------------------------------------------------------
+    // Scene query tools
+    // -------------------------------------------------------------------------
+
+    /** Returns a structured description of all meshes visible from a camera — replaces screenshot for scene comprehension. */
+    public static readonly SceneVisibleObjectsFn = "scene_visible_objects";
+
+    /** Casts a ray from the camera through a screen point and returns the first mesh hit. */
+    public static readonly ScenePickFromCenterFn = "scene_pick_from_center";
+
+    // -------------------------------------------------------------------------
 
     public constructor(adapter: IMcpBehaviorAdapter, options: McpBehaviorOptions = {}) {
         super(adapter, {
@@ -513,6 +523,97 @@ export class McpCameraBehavior extends McpBehavior {
                     type: "object",
                     properties: {
                         uri: { type: "string", description: "Camera URI" },
+                    },
+                    required: ["uri"],
+                    additionalProperties: false,
+                },
+            },
+
+            // -----------------------------------------------------------------
+            // scene.visibleObjects — structured scene description from camera POV
+            // -----------------------------------------------------------------
+            {
+                name: McpCameraBehavior.SceneVisibleObjectsFn,
+                description:
+                    "Returns a structured list of all scene meshes currently visible from a camera. " +
+                    "Use this instead of camera_snapshot to understand what the camera sees — no image required. " +
+                    "Each entry includes position, bounding box, material color and flags, filtered to the frustum. " +
+                    "Results are sorted by distance (closest first) unless sortBy overrides it.",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        uri: { type: "string", description: "Camera URI, e.g. babylon://camera/MyCamera" },
+                        maxObjects: {
+                            type: "number",
+                            description: "Maximum number of objects to return. Defaults to 50.",
+                        },
+                        include: {
+                            type: "array",
+                            description:
+                                "Fields to include in each object entry. Omit or leave empty for all fields. " +
+                                "Valid values: transform, bounds, material, color, visibility, tags.",
+                            items: {
+                                type: "string",
+                                enum: ["transform", "bounds", "material", "color", "visibility", "tags"],
+                            },
+                        },
+                        onlyPickable: {
+                            type: "boolean",
+                            description: "If true, only include meshes that are pickable. Defaults to false.",
+                        },
+                        minScreenCoverage: {
+                            type: "number",
+                            description: "Minimum fraction of screen area (0..1) the mesh bounding box must cover to be included. Defaults to 0.001.",
+                        },
+                        layerMask: {
+                            type: "number",
+                            description: "Optional layer mask filter. Only meshes whose layerMask shares at least one bit are included.",
+                        },
+                        sortBy: {
+                            type: "string",
+                            enum: ["distance", "screenCoverage", "name"],
+                            description: "Sort order for the visible list. Defaults to 'distance' (closest first).",
+                        },
+                    },
+                    required: ["uri"],
+                    additionalProperties: false,
+                },
+            },
+
+            // -----------------------------------------------------------------
+            // scene.pickFromCenter — raycast from camera screen point
+            // -----------------------------------------------------------------
+            {
+                name: McpCameraBehavior.ScenePickFromCenterFn,
+                description:
+                    "Casts a ray from the camera through a normalized screen point and returns the first mesh hit. " +
+                    "Useful for answering 'what am I looking at?' — defaults to the screen center (crosshair pick). " +
+                    "Returns the hit mesh, world-space impact point, surface normal, and distance.",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        uri: { type: "string", description: "Camera URI, e.g. babylon://camera/MyCamera" },
+                        screenPoint: {
+                            type: "object",
+                            description: "Normalized screen position to cast from. Defaults to center (0.5, 0.5).",
+                            properties: {
+                                x: { type: "number", description: "Horizontal position (0 = left edge, 1 = right edge)." },
+                                y: { type: "number", description: "Vertical position (0 = top edge, 1 = bottom edge)." },
+                            },
+                            required: ["x", "y"],
+                            additionalProperties: false,
+                        },
+                        maxDistance: {
+                            type: "number",
+                            description: "Maximum ray distance in world units. Defaults to unlimited.",
+                        },
+                        allHits: {
+                            type: "boolean",
+                            description:
+                                "If true, returns all meshes intersected by the ray (including those behind the first hit), " +
+                                "sorted by distance in the hits array. Useful when objects are stacked or partially occluded. " +
+                                "Defaults to false (closest hit only).",
+                        },
                     },
                     required: ["uri"],
                     additionalProperties: false,
