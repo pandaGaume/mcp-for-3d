@@ -30,7 +30,19 @@ import {
 import { JsonRpcMimeType, McpAdapterBase, McpResourceContent, McpToolResult, McpToolResults } from "@dev/core";
 import { McpCameraBehavior } from "../behaviours";
 import { McpBabylonDomain, McpCameraResourceUriPrefix } from "../mcp.commons";
-import { ICameraState, IFrustum, IScenePickHit, IScenePickResult, ISceneVisibleObjectsState, IVisibleObjectMaterialState, IVisibleObjectState, MaterialType, MeshShapeHint, VisibleObjectIncludeField, VisibleObjectSortBy } from "../states";
+import {
+    ICameraState,
+    IFrustum,
+    IScenePickHit,
+    IScenePickResult,
+    ISceneVisibleObjectsState,
+    IVisibleObjectMaterialState,
+    IVisibleObjectState,
+    MaterialType,
+    MeshShapeHint,
+    VisibleObjectIncludeField,
+    VisibleObjectSortBy,
+} from "../states";
 
 const DEG_TO_RAD = Math.PI / 180;
 const RAD_TO_DEG = 180 / Math.PI;
@@ -1087,7 +1099,10 @@ export class McpCameraAdapter extends McpAdapterBase {
 
             const corners = bi.boundingBox.vectorsWorld;
             if (corners.length > 0) {
-                let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+                let minX = Infinity,
+                    minY = Infinity,
+                    maxX = -Infinity,
+                    maxY = -Infinity;
                 const identity = Matrix.Identity();
                 for (const corner of corners) {
                     const proj = Vector3.Project(corner, identity, transformMatrix, viewport);
@@ -1301,15 +1316,60 @@ export class McpCameraAdapter extends McpAdapterBase {
         return false;
     }
 
-    /** Best-effort shape classification: checks mesh metadata first, then falls back to name keywords. */
+    /**
+     * Best-effort shape classification using three priority levels:
+     *
+     * 1. `mesh.metadata.shapeHint` — explicit override set by the application.
+     * 2. Name keywords — fast pattern match (sphere, box, plane, cylinder, torus …).
+     * 3. Bounding-geometry analysis — uses world-space AABB extents and the
+     *    bounding-sphere fill ratio to distinguish between shape families:
+     *    - **plane**    : one extent < 10 % of the largest → degenerate flat dimension.
+     *    - **cylinder** : XZ extents within 15 % of each other, Y extent clearly different.
+     *    - **sphere**   : all extents within 15 % of each other AND fill ratio ≈ 1.0.
+     *      (For a perfect sphere the bounding sphere is tight: radius ≈ max half-extent.)
+     *    - **box**      : all extents within 15 % but fill ratio ≈ √3 ≈ 1.73.
+     */
     private _getShapeHint(mesh: AbstractMesh): MeshShapeHint {
+        // Priority 1 — explicit metadata
         if (mesh.metadata?.shapeHint) return mesh.metadata.shapeHint as MeshShapeHint;
+
+        // Priority 2 — name keywords
         const lower = mesh.name.toLowerCase();
         if (/sphere|ball/.test(lower)) return "sphere";
         if (/box|cube/.test(lower)) return "box";
         if (/plane|ground|floor/.test(lower)) return "plane";
         if (/cylinder|tube|pipe/.test(lower)) return "cylinder";
         if (/torus|ring/.test(lower)) return "torus";
+
+        // Priority 3 — bounding-geometry analysis (world-space)
+        const bi = mesh.getBoundingInfo();
+        const bbMin = bi.boundingBox.minimumWorld;
+        const bbMax = bi.boundingBox.maximumWorld;
+        const sx = (bbMax.x - bbMin.x) / 2; // world-space half-extents
+        const sy = (bbMax.y - bbMin.y) / 2;
+        const sz = (bbMax.z - bbMin.z) / 2;
+
+        if (sx < 1e-4 || sy < 1e-4 || sz < 1e-4) return "plane"; // near-zero extent
+
+        const maxExt = Math.max(sx, sy, sz);
+        const minExt = Math.min(sx, sy, sz);
+
+        // Very flat in at least one dimension → plane
+        if (minExt / maxExt < 0.1) return "plane";
+
+        // XZ roughly equal and Y clearly different → cylinder (Y-axis aligned)
+        const ratioXZ = Math.min(sx, sz) / Math.max(sx, sz);
+        if (ratioXZ > 0.85 && (Math.min(sx, sz) / sy < 0.7 || sy / Math.min(sx, sz) < 0.7)) return "cylinder";
+
+        // All extents roughly equal → sphere or box
+        if (minExt / maxExt > 0.85) {
+            // Fill ratio: sphere radius / max half-extent
+            //   Sphere → radius ≈ maxExt  → ratio ≈ 1.0
+            //   Cube   → radius ≈ √3·maxExt → ratio ≈ 1.73
+            const fillRatio = bi.boundingSphere.radius / maxExt;
+            return fillRatio < 1.3 ? "sphere" : "box";
+        }
+
         return "unknown";
     }
 

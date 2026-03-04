@@ -1,0 +1,458 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>MCP Babylon — Template</title>
+        <link rel="stylesheet" href="css/sample.css" />
+    </head>
+    <body>
+        <header>
+            <h1 id="page-title">MCP Babylon — Template</h1>
+            <span id="status-badge" class="badge disconnected">Disconnected</span>
+        </header>
+
+        <div class="layout">
+            <!-- ── Left panel: connection ──────────────────── -->
+            <aside class="left-panel panel">
+                <div class="panel-title">Connection</div>
+                <div class="panel-body">
+                    <div class="field">
+                        <label for="ws-url">Tunnel provider base URL</label>
+                        <input type="text" id="ws-url" value="" />
+                    </div>
+                    <div class="field">
+                        <label for="server-name">Server name</label>
+                        <input type="text" id="server-name" value="" />
+                    </div>
+                    <div class="btn-row">
+                        <button id="start-btn">▶ Start</button>
+                        <button id="stop-btn" disabled>■ Stop</button>
+                    </div>
+                    <div class="field" id="mcp-endpoint-field" style="display: none; margin-top: 14px">
+                        <label for="mcp-endpoint">MCP endpoint</label>
+                        <input type="text" id="mcp-endpoint" readonly style="color: var(--green); cursor: text" />
+                    </div>
+                </div>
+            </aside>
+
+            <!-- ── Right column ────────────────────────────── -->
+            <div class="right-column">
+                <!-- Top: Babylon scene -->
+                <div class="scene-panel">
+                    <canvas id="renderCanvas"></canvas>
+                </div>
+
+                <!-- Bottom: console -->
+                <section class="console-panel panel">
+                    <div class="panel-title">Console</div>
+                    <div class="panel-body" id="console-output"></div>
+                </section>
+            </div>
+        </div>
+
+        <!-- Babylon.js core (CDN) -->
+        <script src="https://cdn.babylonjs.com/babylon.js"></script>
+
+        <!-- MCP bundles — load order matters:
+             1. mcp-core.js    → window.McpCore    (shared interfaces, externalized by mcp-babylon)
+             2. mcp-server.js  → window.McpServer   (McpServerBuilder and protocol impl)
+             3. mcp-babylon.js → window.McpBabylon  (McpCameraAdapter, McpMeshAdapter, …) -->
+        <script src="/bundle/mcp-core.js"></script>
+        <script src="/bundle/mcp-server.js"></script>
+        <script src="/bundle/mcp-babylon.js"></script>
+
+        <script>
+            "use strict";
+
+            // =========================================================
+            // Page title & server name derived from the file name
+            // =========================================================
+            (function () {
+                const path = window.location.pathname;
+                const file = path.substring(path.lastIndexOf("/") + 1);
+                const name = file.split(".").slice(0, -1).join(".") || file;
+                document.getElementById("server-name").value = name;
+                document.getElementById("page-title").textContent = `MCP Babylon — ${name}`;
+                document.title = `MCP Babylon — ${name}`;
+
+                // Derive the provider WebSocket URL from the current page origin so
+                // ws:// is used over HTTP and wss:// is used over HTTPS (avoids
+                // mixed-content errors when the tunnel runs in TLS mode).
+                const wsScheme = window.location.protocol === "https:" ? "wss:" : "ws:";
+                document.getElementById("ws-url").value = `${wsScheme}//${window.location.host}/provider`;
+            })();
+
+            // =========================================================
+            // Console helpers
+            // =========================================================
+            const consoleEl = document.getElementById("console-output");
+
+            function log(msg, level = "info") {
+                const ts = new Date().toLocaleTimeString("en", {
+                    hour12: false,
+                    hour: "2-digit",
+                    minute: "2-digit",
+                    second: "2-digit",
+                });
+                const div = document.createElement("div");
+                div.className = `log-line ${level}`;
+                div.innerHTML = `<span class="ts">${ts}</span>  <span class="msg">${escHtml(msg)}</span>`;
+                consoleEl.appendChild(div);
+                consoleEl.scrollTop = consoleEl.scrollHeight;
+            }
+
+            function escHtml(s) {
+                return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+            }
+
+            // =========================================================
+            // Status badge
+            // =========================================================
+            const badgeEl = document.getElementById("status-badge");
+
+            function setStatus(state) {
+                badgeEl.className = `badge ${state}`;
+                badgeEl.textContent =
+                    {
+                        disconnected: "Disconnected",
+                        connecting: "Connecting…",
+                        connected: "Connected",
+                    }[state] ?? state;
+            }
+
+            // =========================================================
+            // Babylon.js engine + scene
+            // =========================================================
+            const canvas = document.getElementById("renderCanvas");
+            const engine = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer: true, stencil: true });
+            const scene = new BABYLON.Scene(engine);
+
+            engine.runRenderLoop(() => scene.render());
+            window.addEventListener("resize", () => engine.resize());
+
+            /**
+             * Populate the Babylon.js scene with a battlefield-style layout:
+             *
+             *   Faction layout (top view, XZ plane, Y-up):
+             *
+             *             [castle-wall]
+             *        [watchtower]  [watchtower]
+             *
+             *    enemy   enemy   enemy   enemy        ← z = -4
+             *    (crates arranged as cover)
+             *
+             *    ally    ally    ally    ally          ← z = +4
+             *    (barrels arranged as cover)
+             *
+             *             [player]                    ← z = +7  (box)
+             *
+             *   Static landmarks (tagged "static"):
+             *     - ground plane
+             *     - castle-wall  : flat box at z = -8
+             *     - watchtower-L : tall cylinder at (−3, 0, −8)
+             *     - watchtower-R : tall cylinder at ( +3, 0, −8)
+             *     - crate-NW/NE/NC: small boxes at enemy positions (cover, tagged "cover static")
+             *     - barrel-SW/SE : short cylinders at ally positions (cover, tagged "cover static")
+             *
+             *   Enemies (tagged "enemy unit"):
+             *     enemy-alpha, enemy-beta, enemy-gamma, enemy-delta
+             *     Small red spheres at z = -4, separated by 2 units on X.
+             *
+             *   Allies (tagged "ally unit"):
+             *     ally-alpha, ally-beta, ally-gamma
+             *     Small green spheres at z = +4, separated by 3 units on X.
+             *
+             *   Player (tagged "player unit"):
+             *     player — blue box at (0, 0.5, 7).
+             *
+             * @param {BABYLON.Scene} scene
+             */
+            function createScene(scene) {
+                // ---------------------------------------------------------
+                // Lighting
+                // ---------------------------------------------------------
+                const hemi = new BABYLON.HemisphericLight("hemi", new BABYLON.Vector3(0, 1, 0), scene);
+                hemi.intensity = 0.55;
+
+                const sun = new BABYLON.DirectionalLight("sun", new BABYLON.Vector3(-1, -2, 0.5).normalize(), scene);
+                sun.intensity = 0.8;
+
+                // ---------------------------------------------------------
+                // Ground
+                // ---------------------------------------------------------
+                const ground = BABYLON.MeshBuilder.CreateGround("ground", { width: 24, height: 24 }, scene);
+                const gMat = new BABYLON.StandardMaterial("groundMat", scene);
+                gMat.diffuseColor = new BABYLON.Color3(0.12, 0.18, 0.12);
+                gMat.specularColor = BABYLON.Color3.Black();
+                ground.material = gMat;
+                BABYLON.Tags.AddTagsTo(ground, "static");
+
+                // ---------------------------------------------------------
+                // Helper: make a StandardMaterial with given diffuse color
+                // ---------------------------------------------------------
+                function mat(name, r, g, b) {
+                    const m = new BABYLON.StandardMaterial(name, scene);
+                    m.diffuseColor = new BABYLON.Color3(r, g, b);
+                    m.specularColor = new BABYLON.Color3(r * 0.15, g * 0.15, b * 0.15);
+                    return m;
+                }
+
+                // ---------------------------------------------------------
+                // Static landmarks
+                // ---------------------------------------------------------
+
+                // Castle wall — thick slab at the far end
+                const wall = BABYLON.MeshBuilder.CreateBox("castle-wall", { width: 14, height: 3, depth: 1.5 }, scene);
+                wall.position.set(0, 1.5, -9.25);
+                wall.material = mat("wallMat", 0.45, 0.38, 0.3);
+                BABYLON.Tags.AddTagsTo(wall, "static landmark");
+                log(`Mesh "castle-wall" → static landmark at (0, 1.5, -9.25)`, "dim");
+
+                // Watchtowers (cylinders)
+                const towerPositions = [
+                    { id: "watchtower-L", x: -6, z: -9.25 },
+                    { id: "watchtower-R", x: 6, z: -9.25 },
+                ];
+                for (const tp of towerPositions) {
+                    const tower = BABYLON.MeshBuilder.CreateCylinder(tp.id, { diameter: 2, height: 6, tessellation: 12 }, scene);
+                    tower.position.set(tp.x, 3, tp.z);
+                    tower.material = mat(`${tp.id}Mat`, 0.4, 0.35, 0.28);
+                    BABYLON.Tags.AddTagsTo(tower, "static landmark");
+                    log(`Mesh "${tp.id}" → static landmark at (${tp.x}, 3, ${tp.z})`, "dim");
+                }
+
+                // Cover crates (enemy side, small boxes)
+                const cratePositions = [
+                    { id: "crate-NW", x: -3, z: -6 },
+                    { id: "crate-NC", x: 0, z: -6 },
+                    { id: "crate-NE", x: 3, z: -6 },
+                ];
+                for (const cp of cratePositions) {
+                    const crate = BABYLON.MeshBuilder.CreateBox(cp.id, { size: 1 }, scene);
+                    crate.position.set(cp.x, 0.5, cp.z);
+                    crate.material = mat(`${cp.id}Mat`, 0.55, 0.38, 0.18);
+                    BABYLON.Tags.AddTagsTo(crate, "static cover");
+                    log(`Mesh "${cp.id}" → static cover at (${cp.x}, 0.5, ${cp.z})`, "dim");
+                }
+
+                // Cover barrels (ally side, squat cylinders)
+                const barrelPositions = [
+                    { id: "barrel-SW", x: -2.5, z: 6 },
+                    { id: "barrel-SE", x: 2.5, z: 6 },
+                ];
+                for (const bp of barrelPositions) {
+                    const barrel = BABYLON.MeshBuilder.CreateCylinder(bp.id, { diameter: 0.9, height: 1.2, tessellation: 10 }, scene);
+                    barrel.position.set(bp.x, 0.6, bp.z);
+                    barrel.material = mat(`${bp.id}Mat`, 0.25, 0.35, 0.55);
+                    BABYLON.Tags.AddTagsTo(barrel, "static cover");
+                    log(`Mesh "${bp.id}" → static cover at (${bp.x}, 0.6, ${bp.z})`, "dim");
+                }
+
+                // ---------------------------------------------------------
+                // Enemies — red spheres, tagged "enemy unit"
+                // ---------------------------------------------------------
+                const enemyIds = ["enemy-alpha", "enemy-beta", "enemy-gamma", "enemy-delta"];
+                const enemyXPositions = [-4.5, -1.5, 1.5, 4.5];
+                for (let i = 0; i < enemyIds.length; i++) {
+                    const enemy = BABYLON.MeshBuilder.CreateSphere(enemyIds[i], { diameter: 1, segments: 12 }, scene);
+                    enemy.position.set(enemyXPositions[i], 0.5, -4);
+                    enemy.material = mat(`${enemyIds[i]}Mat`, 0.9, 0.15, 0.1);
+                    BABYLON.Tags.AddTagsTo(enemy, "enemy unit");
+                    log(`Mesh "${enemyIds[i]}" → enemy unit at (${enemyXPositions[i]}, 0.5, -4)`, "dim");
+                }
+
+                // ---------------------------------------------------------
+                // Allies — green spheres, tagged "ally unit"
+                // ---------------------------------------------------------
+                const allyIds = ["ally-alpha", "ally-beta", "ally-gamma"];
+                const allyXPositions = [-3, 0, 3];
+                for (let i = 0; i < allyIds.length; i++) {
+                    const ally = BABYLON.MeshBuilder.CreateSphere(allyIds[i], { diameter: 1, segments: 12 }, scene);
+                    ally.position.set(allyXPositions[i], 0.5, 4);
+                    ally.material = mat(`${allyIds[i]}Mat`, 0.15, 0.8, 0.2);
+                    BABYLON.Tags.AddTagsTo(ally, "ally unit");
+                    log(`Mesh "${allyIds[i]}" → ally unit at (${allyXPositions[i]}, 0.5, 4)`, "dim");
+                }
+
+                // ---------------------------------------------------------
+                // Player — blue box, tagged "player unit"
+                // ---------------------------------------------------------
+                const player = BABYLON.MeshBuilder.CreateBox("player", { width: 1, height: 1, depth: 1 }, scene);
+                player.position.set(0, 0.5, 7);
+                player.material = mat("playerMat", 0.1, 0.4, 1.0);
+                BABYLON.Tags.AddTagsTo(player, "player unit");
+                log(`Mesh "player" → player unit at (0, 0.5, 7)`, "dim");
+
+                // ---------------------------------------------------------
+                // Camera — overview angle looking down at the battlefield
+                // ---------------------------------------------------------
+                const camera = new BABYLON.ArcRotateCamera(
+                    "camera",
+                    -Math.PI / 2,  // α = -π/2 → face north (-Z direction)
+                    Math.PI / 3,   // β ≈ 60° → slightly overhead
+                    22,            // radius
+                    new BABYLON.Vector3(0, 0, -1), // look at center of battlefield
+                    scene
+                );
+                camera.attachControl(canvas, true);
+                camera.lowerRadiusLimit = 5;
+                camera.upperRadiusLimit = 40;
+
+                log("Camera ready — overview of the battlefield.", "ok");
+            }
+
+            createScene(scene);
+
+            // =========================================================
+            // MCP server lifecycle
+            // =========================================================
+            const { McpServerBuilder } = window.McpServer;
+            const { McpCameraAdapter, McpCameraBehavior, McpMeshAdapter, McpMeshBehavior } = window.McpBabylon;
+            let server = null;
+
+            /**
+             * Creates and returns the MCP behaviors for this scene.
+             *
+             *   McpMeshAdapter / McpMeshBehavior — mesh index, tag system, transform and
+             *     material tools, animation, find-by-tag query.
+             *   McpCameraAdapter / McpCameraBehavior — camera state + scene_visible_objects
+             *     and scene_pick_from_center for scene comprehension without screenshots.
+             *
+             * @param {BABYLON.Scene} scene
+             * @returns {import('@dev/core').IMcpBehavior[]}
+             */
+            function createBehaviour(scene) {
+                const mesh_adapter = new McpMeshAdapter(scene);
+                const mesh_behavior = new McpMeshBehavior(mesh_adapter);
+
+                const cam_adapter = new McpCameraAdapter(scene);
+                const cam_behavior = new McpCameraBehavior(cam_adapter);
+
+                return [mesh_behavior, cam_behavior];
+            }
+
+            document.getElementById("start-btn").addEventListener("click", async () => {
+                const providerBase = document.getElementById("ws-url").value.trim().replace(/\/$/, "");
+                const name = document.getElementById("server-name").value.trim() || "babylon-mesh";
+
+                const wsUrl = `${providerBase}/${encodeURIComponent(name)}`;
+
+                const httpBase = wsUrl.replace(/^ws(s?):\/\//, "http$1://").replace(/\/provider\//, "/");
+                const mcpHttpUrl = httpBase.endsWith("/mcp") ? httpBase : httpBase + "/mcp";
+
+                log(`Connecting to ${wsUrl} …`, "dim");
+                setStatus("connecting");
+
+                const builder = new McpServerBuilder()
+                    .withWsUrl(wsUrl)
+                    .withName(name)
+                    .withInitializer({
+                        initialize(_clientInfo, _caps) {
+                            return {
+                                protocolVersion: "2024-11-05",
+                                serverInfo: { name, version: "0.0.0" },
+                                instructions:
+                                    "You are connected to a LIVE 3D battlefield scene. " +
+                                    "ALWAYS use MCP tools and resources — do NOT write or suggest any code. " +
+
+                                    "\n\nSCENE LAYOUT: " +
+                                    "A top-down battlefield viewed from a birds-eye ArcRotateCamera. " +
+                                    "The coordinate system is right-handed Y-up. All units rest on Y=0 with their centre at Y=0.5. " +
+                                    "North is the -Z direction (enemy territory); South is +Z (friendly territory). " +
+
+                                    "\n\nFACTIONS AND TAGS: " +
+                                    "Meshes carry Babylon.js tags you can query with mesh_find_by_tag (boolean: &&, ||, !). " +
+                                    "  • 'enemy unit'   — 4 red spheres at Z=-4: enemy-alpha (-4.5,0.5,-4), enemy-beta (-1.5,0.5,-4), enemy-gamma (1.5,0.5,-4), enemy-delta (4.5,0.5,-4). " +
+                                    "  • 'ally unit'    — 3 green spheres at Z=+4: ally-alpha (-3,0.5,4), ally-beta (0,0.5,4), ally-gamma (3,0.5,4). " +
+                                    "  • 'player unit'  — 1 blue box at (0,0.5,7): mesh id 'player'. " +
+                                    "  • 'static cover' — 3 brown crates on the enemy side (crate-NW/NC/NE at Z=-6) and 2 blue barrels on the ally side (barrel-SW/SE at Z=+6). " +
+                                    "  • 'static landmark' — castle-wall (flat box at Z=-9.25), watchtower-L (-6,3,-9.25) and watchtower-R (6,3,-9.25) (tall cylinders). " +
+                                    "  • 'static'       — the ground plane and all landmarks/cover inherit this tag. " +
+
+                                    "\n\nMESH RESOURCES: " +
+                                    "Read 'babylon://mesh' to list all meshes with their URIs and tags. " +
+                                    "Read 'babylon://mesh/{meshId}' (e.g. 'babylon://mesh/player') for the full state of a single mesh " +
+                                    "(transform, material, visibility, tags, children, etc.). " +
+
+                                    "\n\nTOOL ROUTING: " +
+                                    "Every mesh tool requires the 'uri' argument set to a specific mesh URI (e.g. 'babylon://mesh/player'). " +
+                                    "mesh_find_by_tag is the exception: pass uri='babylon://mesh' (namespace-level) plus a 'query' expression. " +
+                                    "Always read 'babylon://mesh' or use mesh_find_by_tag first to obtain exact URIs before calling any tool. " +
+
+                                    "\n\nAVAILABLE MESH OPERATIONS: " +
+                                    "mesh_set_enabled / mesh_set_visible / mesh_set_visibility — show, hide or fade a mesh. " +
+                                    "mesh_set_position — teleport a mesh to absolute world-space coordinates. " +
+                                    "mesh_set_rotation — set Euler rotation in degrees (x=pitch, y=yaw, z=roll). " +
+                                    "mesh_set_scaling — resize a mesh (1,1,1 = original size; negative = mirror). " +
+                                    "mesh_animate_to — smoothly animate position, rotation and/or scaling over a duration with easing. " +
+                                    "mesh_set_color — change the base color of a mesh (r, g, b in 0..1). " +
+                                    "mesh_set_material_alpha — set material transparency (0=transparent, 1=opaque). " +
+                                    "mesh_tag_add / mesh_tag_remove / mesh_tag_set — manage tags (space-separated). " +
+                                    "mesh_find_by_tag — find meshes by boolean tag expressions (uri=babylon://mesh, query='enemy && !disabled'). " +
+
+                                    "\n\nAVAILABLE CAMERA / SCENE OPERATIONS: " +
+                                    "scene_visible_objects — list all meshes currently visible in the camera frustum, sorted by screen coverage, distance or name. " +
+                                    "scene_pick_from_center — cast a ray from the camera through a normalized screen point and return hit mesh(es). " +
+                                    "camera_set_target / camera_orbit / camera_dolly / camera_pan / camera_animate_to — move the overview camera. " +
+                                    "camera_snapshot — capture a base64 PNG screenshot. " +
+
+                                    "\n\nSUGGESTED WORKFLOWS: " +
+                                    "1. Reconnaissance: call scene_visible_objects (include=[\"flags\",\"tags\"]) to get a situational overview. " +
+                                    "2. Unit query: mesh_find_by_tag with 'enemy unit' to get all enemy URIs, then read each mesh for details. " +
+                                    "3. Tactical manoeuvre: mesh_animate_to to smoothly reposition a unit with easing (e.g. sine.inout). " +
+                                    "4. Status change: mesh_set_visible false to 'eliminate' a unit, or mesh_set_color to flag it as wounded. " +
+                                    "5. Reinforce: mesh_tag_add to promote a unit ('ally unit elite') and mesh_set_scaling to grow it slightly.",
+                            };
+                        },
+                    });
+
+                const behaviours = createBehaviour(scene);
+                if (behaviours) {
+                    if (Array.isArray(behaviours)) {
+                        builder.register(...behaviours);
+                    } else {
+                        builder.register(behaviours);
+                    }
+                }
+                server = builder.build();
+
+                try {
+                    await server.start();
+                    setStatus("connected");
+                    log(`Connected as provider — "${name}"`, "ok");
+                    log(`MCP Inspector → ${mcpHttpUrl}`, "ok");
+                    log("Waiting for MCP client…", "dim");
+
+                    document.getElementById("start-btn").disabled = true;
+                    document.getElementById("stop-btn").disabled = false;
+                    document.getElementById("mcp-endpoint").value = mcpHttpUrl;
+                    document.getElementById("mcp-endpoint-field").style.display = "";
+                } catch (err) {
+                    setStatus("disconnected");
+                    log(`Failed to connect: ${err}`, "error");
+                    server = null;
+                }
+            });
+
+            document.getElementById("stop-btn").addEventListener("click", async () => {
+                if (!server) return;
+                try {
+                    await server.stop();
+                    log("Server stopped.", "warn");
+                } catch (err) {
+                    log(`Stop error: ${err}`, "error");
+                } finally {
+                    server = null;
+                    setStatus("disconnected");
+                    document.getElementById("start-btn").disabled = false;
+                    document.getElementById("stop-btn").disabled = true;
+                    document.getElementById("mcp-endpoint-field").style.display = "none";
+                    document.getElementById("mcp-endpoint").value = "";
+                }
+            });
+
+            log("Ready. Press ▶ Start to connect as an MCP provider.", "dim");
+        </script>
+    </body>
+</html>
