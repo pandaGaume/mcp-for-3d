@@ -229,7 +229,11 @@ export class WsTunnel {
             this._httpServer = this._options.tls
                 ? https.createServer({ cert: this._options.tls.cert, key: this._options.tls.key }, handler)
                 : http.createServer(handler);
-            this._wss = new WebSocketServer({ server: this._httpServer });
+            // Disable perMessageDeflate: snapshots are large base64-encoded PNGs
+            // (already compressed). Deflating them wastes CPU without reducing size,
+            // which caused multi-second stalls when transferring snapshot responses
+            // over WSS.
+            this._wss = new WebSocketServer({ server: this._httpServer, perMessageDeflate: false });
 
             this._wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
                 const url          = req.url ?? "/";
@@ -479,9 +483,10 @@ export class WsTunnel {
 
     /** Writes one JSON-RPC message as an SSE `message` event. */
     private _sendSseEvent(res: ServerResponse, data: string): void {
-        let line: string;
-        try { line = JSON.stringify(JSON.parse(data)); } catch { line = data; }
-        res.write(`event: message\ndata: ${line}\n\n`);
+        // data is already a compact JSON string — no need to parse+re-serialize.
+        // Doing so would allocate the full object tree for multi-MB snapshot
+        // responses, adding unnecessary overhead.
+        res.write(`event: message\ndata: ${data}\n\n`);
     }
 
     // -------------------------------------------------------------------------

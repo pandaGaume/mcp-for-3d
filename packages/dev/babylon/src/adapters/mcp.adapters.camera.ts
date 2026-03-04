@@ -1,4 +1,25 @@
-import { ArcRotateCamera, BackEase, BounceEase, Camera, CircleEase, CubicEase, EasingFunction, ElasticEase, Engine, EventState, ExponentialEase, Matrix, Nullable, Observer, QuadraticEase, Scene, SineEase, TargetCamera, Tools, Vector3 } from "@babylonjs/core";
+import {
+    ArcRotateCamera,
+    BackEase,
+    BounceEase,
+    Camera,
+    CircleEase,
+    CubicEase,
+    EasingFunction,
+    ElasticEase,
+    Engine,
+    EventState,
+    ExponentialEase,
+    Matrix,
+    Nullable,
+    Observer,
+    QuadraticEase,
+    Scene,
+    SineEase,
+    TargetCamera,
+    Tools,
+    Vector3,
+} from "@babylonjs/core";
 import { JsonRpcMimeType, McpAdapterBase, McpResourceContent, McpToolResult, McpToolResults } from "@dev/core";
 import { McpCameraBehavior } from "../behaviours";
 import { McpBabylonDomain, McpCameraResourceUriPrefix } from "../mcp.commons";
@@ -415,9 +436,9 @@ export class McpCameraAdapter extends McpAdapterBase {
                 // Build the Babylon.js size parameter from the optional size argument.
                 // Priority: explicit width+height → precision → default native resolution (precision 1).
                 let bjsSize: number | { width: number; height: number } | { precision: number };
-                if (sizeArg?.width != null && sizeArg?.height != null) {
+                if (sizeArg?.width && sizeArg?.height) {
                     bjsSize = { width: Math.round(sizeArg.width), height: Math.round(sizeArg.height) };
-                } else if (sizeArg?.precision != null) {
+                } else if (sizeArg?.precision) {
                     bjsSize = { precision: sizeArg.precision };
                 } else {
                     bjsSize = { precision: 1 }; // native viewport resolution
@@ -431,20 +452,18 @@ export class McpCameraAdapter extends McpAdapterBase {
                         camera,
                         bjsSize,
                         "image/png",
-                        1,    // MSAA samples
+                        1, // MSAA samples
                         false, // antialiasing (handled by MSAA)
                         undefined, // fileName — not used in async path
                         false, // renderSprites
-                        true   // dumpEvenIfNotActive — capture even if camera is not the scene's active camera
+                        true // dumpEvenIfNotActive — capture even if camera is not the scene's active camera
                     );
                     // Strip the "data:image/png;base64," prefix — MCP image content expects raw base64.
                     const comma = dataUrl.indexOf(",");
                     const base64 = comma >= 0 ? dataUrl.slice(comma + 1) : dataUrl;
                     return McpToolResults.image(base64, "image/png");
                 } catch (err) {
-                    return McpToolResults.error(
-                        `Snapshot failed for camera "${camera.name}": ${err instanceof Error ? err.message : String(err)}`
-                    );
+                    return McpToolResults.error(`Snapshot failed for camera "${camera.name}": ${err instanceof Error ? err.message : String(err)}`);
                 }
             }
 
@@ -453,9 +472,7 @@ export class McpCameraAdapter extends McpAdapterBase {
             // -----------------------------------------------------------------
             case McpCameraBehavior.CameraAnimateToFn: {
                 if (!(camera instanceof TargetCamera)) {
-                    return McpToolResults.error(
-                        `Camera "${camera.name}" (${camera.getClassName()}) does not support animateTo. Only TargetCamera subclasses are supported.`
-                    );
+                    return McpToolResults.error(`Camera "${camera.name}" (${camera.getClassName()}) does not support animateTo. Only TargetCamera subclasses are supported.`);
                 }
                 // Capture as a const TargetCamera so TypeScript preserves the narrowed type in closures.
                 const cam = camera;
@@ -483,37 +500,43 @@ export class McpCameraAdapter extends McpAdapterBase {
                 const startFov = cam.fov;
 
                 return await new Promise<McpToolResult>((resolve) => {
-                    this._animate(uri, duration, easingStr, (t) => {
-                        if (cam instanceof ArcRotateCamera) {
-                            if (endPos && endTgt) {
-                                // Combined: setTarget first, then setPosition.
-                                // setPosition will recompute alpha/beta/radius relative to the new target.
-                                cam.setTarget(Vector3.Lerp(startTgt, endTgt, t));
-                                cam.setPosition(Vector3.Lerp(startPos, endPos, t));
-                            } else if (endTgt) {
-                                // Target-only: slide the orbit centre while preserving orbital angles.
-                                // Save/restore prevents rebuildAnglesAndRadius() from drifting alpha/beta.
-                                const savedAlpha = cam.alpha;
-                                const savedBeta = cam.beta;
-                                const savedRadius = cam.radius;
-                                cam.setTarget(Vector3.Lerp(startTgt, endTgt, t));
-                                cam.alpha = savedAlpha;
-                                cam.beta = savedBeta;
-                                cam.radius = savedRadius;
-                            } else if (endPos) {
-                                cam.setPosition(Vector3.Lerp(startPos, endPos, t));
+                    this._animate(
+                        uri,
+                        duration,
+                        easingStr,
+                        (t) => {
+                            if (cam instanceof ArcRotateCamera) {
+                                if (endPos && endTgt) {
+                                    // Combined: setTarget first, then setPosition.
+                                    // setPosition will recompute alpha/beta/radius relative to the new target.
+                                    cam.setTarget(Vector3.Lerp(startTgt, endTgt, t));
+                                    cam.setPosition(Vector3.Lerp(startPos, endPos, t));
+                                } else if (endTgt) {
+                                    // Target-only: slide the orbit centre while preserving orbital angles.
+                                    // Save/restore prevents rebuildAnglesAndRadius() from drifting alpha/beta.
+                                    const savedAlpha = cam.alpha;
+                                    const savedBeta = cam.beta;
+                                    const savedRadius = cam.radius;
+                                    cam.setTarget(Vector3.Lerp(startTgt, endTgt, t));
+                                    cam.alpha = savedAlpha;
+                                    cam.beta = savedBeta;
+                                    cam.radius = savedRadius;
+                                } else if (endPos) {
+                                    cam.setPosition(Vector3.Lerp(startPos, endPos, t));
+                                }
+                            } else {
+                                // Generic TargetCamera: update fields independently.
+                                if (endPos) cam.position.copyFrom(Vector3.Lerp(startPos, endPos, t));
+                                if (endTgt) cam.setTarget(Vector3.Lerp(startTgt, endTgt, t));
                             }
-                        } else {
-                            // Generic TargetCamera: update fields independently.
-                            if (endPos) cam.position.copyFrom(Vector3.Lerp(startPos, endPos, t));
-                            if (endTgt) cam.setTarget(Vector3.Lerp(startTgt, endTgt, t));
+                            if (endFov !== null) {
+                                cam.fov = startFov + (endFov - startFov) * t;
+                            }
+                        },
+                        () => {
+                            resolve(McpToolResults.text(`Camera "${cam.name}" animation complete.`));
                         }
-                        if (endFov !== null) {
-                            cam.fov = startFov + (endFov - startFov) * t;
-                        }
-                    }, () => {
-                        resolve(McpToolResults.text(`Camera "${cam.name}" animation complete.`));
-                    });
+                    );
                 });
             }
 
@@ -522,9 +545,7 @@ export class McpCameraAdapter extends McpAdapterBase {
             // -----------------------------------------------------------------
             case McpCameraBehavior.CameraAnimateOrbitFn: {
                 if (!(camera instanceof TargetCamera)) {
-                    return McpToolResults.error(
-                        `Camera "${camera.name}" (${camera.getClassName()}) does not support animateOrbit. Only TargetCamera subclasses are supported.`
-                    );
+                    return McpToolResults.error(`Camera "${camera.name}" (${camera.getClassName()}) does not support animateOrbit. Only TargetCamera subclasses are supported.`);
                 }
                 const cam = camera;
 
@@ -574,12 +595,18 @@ export class McpCameraAdapter extends McpAdapterBase {
                     const startAlpha = cam.alpha;
                     const startBeta = cam.beta;
                     return await new Promise<McpToolResult>((resolve) => {
-                        this._animate(uri, duration, easingStr, (t) => {
-                            cam.alpha = startAlpha + dAlphaRad * t;
-                            cam.beta = startBeta + dBetaRad * t;
-                        }, () => {
-                            resolve(McpToolResults.text(`Camera "${cam.name}" orbit animation complete.`));
-                        });
+                        this._animate(
+                            uri,
+                            duration,
+                            easingStr,
+                            (t) => {
+                                cam.alpha = startAlpha + dAlphaRad * t;
+                                cam.beta = startBeta + dBetaRad * t;
+                            },
+                            () => {
+                                resolve(McpToolResults.text(`Camera "${cam.name}" orbit animation complete.`));
+                            }
+                        );
                     });
                 }
 
@@ -587,23 +614,29 @@ export class McpCameraAdapter extends McpAdapterBase {
                 const tgt = cam.target.clone();
                 const startRel = cam.position.subtract(tgt);
                 return await new Promise<McpToolResult>((resolve) => {
-                    this._animate(uri, duration, easingStr, (t) => {
-                        let rel = startRel.clone();
-                        if (dAlphaRad !== 0) {
-                            rel = Vector3.TransformCoordinates(rel, Matrix.RotationY(dAlphaRad * t));
+                    this._animate(
+                        uri,
+                        duration,
+                        easingStr,
+                        (t) => {
+                            let rel = startRel.clone();
+                            if (dAlphaRad !== 0) {
+                                rel = Vector3.TransformCoordinates(rel, Matrix.RotationY(dAlphaRad * t));
+                            }
+                            if (dBetaRad !== 0) {
+                                const backward = rel.clone().normalize();
+                                let right = Vector3.Cross(Vector3.Up(), backward);
+                                if (right.lengthSquared() < 0.0001) right = Vector3.Right();
+                                else right.normalize();
+                                rel = Vector3.TransformCoordinates(rel, Matrix.RotationAxis(right, dBetaRad * t));
+                            }
+                            cam.position.copyFrom(tgt.add(rel));
+                            cam.setTarget(tgt);
+                        },
+                        () => {
+                            resolve(McpToolResults.text(`Camera "${cam.name}" orbit animation complete.`));
                         }
-                        if (dBetaRad !== 0) {
-                            const backward = rel.clone().normalize();
-                            let right = Vector3.Cross(Vector3.Up(), backward);
-                            if (right.lengthSquared() < 0.0001) right = Vector3.Right();
-                            else right.normalize();
-                            rel = Vector3.TransformCoordinates(rel, Matrix.RotationAxis(right, dBetaRad * t));
-                        }
-                        cam.position.copyFrom(tgt.add(rel));
-                        cam.setTarget(tgt);
-                    }, () => {
-                        resolve(McpToolResults.text(`Camera "${cam.name}" orbit animation complete.`));
-                    });
+                    );
                 });
             }
 
@@ -612,15 +645,11 @@ export class McpCameraAdapter extends McpAdapterBase {
             // -----------------------------------------------------------------
             case McpCameraBehavior.CameraFollowPathFn: {
                 if (!(camera instanceof TargetCamera)) {
-                    return McpToolResults.error(
-                        `Camera "${camera.name}" (${camera.getClassName()}) does not support followPath. Only TargetCamera subclasses are supported.`
-                    );
+                    return McpToolResults.error(`Camera "${camera.name}" (${camera.getClassName()}) does not support followPath. Only TargetCamera subclasses are supported.`);
                 }
                 const cam = camera;
 
-                const waypointsArg = args["waypoints"] as
-                    | Array<{ position?: { x: number; y: number; z: number }; target?: { x: number; y: number; z: number } }>
-                    | undefined;
+                const waypointsArg = args["waypoints"] as Array<{ position?: { x: number; y: number; z: number }; target?: { x: number; y: number; z: number } }> | undefined;
                 const duration = typeof args["duration"] === "number" && args["duration"] > 0 ? args["duration"] : 3;
                 const easingStr = args["easing"] as string | undefined;
 
@@ -652,26 +681,32 @@ export class McpCameraAdapter extends McpAdapterBase {
                 const N = positions.length; // ≥ 2
 
                 return await new Promise<McpToolResult>((resolve) => {
-                    this._animate(uri, duration, easingStr, (t) => {
-                        // Map t → segment index + local t within that segment.
-                        const segPos = t * (N - 1);
-                        const idx = Math.min(Math.floor(segPos), N - 2);
-                        const localT = segPos - idx;
+                    this._animate(
+                        uri,
+                        duration,
+                        easingStr,
+                        (t) => {
+                            // Map t → segment index + local t within that segment.
+                            const segPos = t * (N - 1);
+                            const idx = Math.min(Math.floor(segPos), N - 2);
+                            const localT = segPos - idx;
 
-                        const lerpedPos = Vector3.Lerp(positions[idx], positions[idx + 1], localT);
-                        const lerpedTgt = Vector3.Lerp(targets[idx], targets[idx + 1], localT);
+                            const lerpedPos = Vector3.Lerp(positions[idx], positions[idx + 1], localT);
+                            const lerpedTgt = Vector3.Lerp(targets[idx], targets[idx + 1], localT);
 
-                        if (cam instanceof ArcRotateCamera) {
-                            // setTarget first, then setPosition to get correct alpha/beta/radius.
-                            cam.setTarget(lerpedTgt);
-                            cam.setPosition(lerpedPos);
-                        } else {
-                            cam.position.copyFrom(lerpedPos);
-                            cam.setTarget(lerpedTgt);
+                            if (cam instanceof ArcRotateCamera) {
+                                // setTarget first, then setPosition to get correct alpha/beta/radius.
+                                cam.setTarget(lerpedTgt);
+                                cam.setPosition(lerpedPos);
+                            } else {
+                                cam.position.copyFrom(lerpedPos);
+                                cam.setTarget(lerpedTgt);
+                            }
+                        },
+                        () => {
+                            resolve(McpToolResults.text(`Camera "${cam.name}" path complete.`));
                         }
-                    }, () => {
-                        resolve(McpToolResults.text(`Camera "${cam.name}" path complete.`));
-                    });
+                    );
                 });
             }
 
@@ -680,9 +715,7 @@ export class McpCameraAdapter extends McpAdapterBase {
             // -----------------------------------------------------------------
             case McpCameraBehavior.CameraShakeFn: {
                 if (!(camera instanceof TargetCamera)) {
-                    return McpToolResults.error(
-                        `Camera "${camera.name}" (${camera.getClassName()}) does not support shake. Only TargetCamera subclasses are supported.`
-                    );
+                    return McpToolResults.error(`Camera "${camera.name}" (${camera.getClassName()}) does not support shake. Only TargetCamera subclasses are supported.`);
                 }
                 const cam = camera;
 
@@ -696,40 +729,46 @@ export class McpCameraAdapter extends McpAdapterBase {
                 return await new Promise<McpToolResult>((resolve) => {
                     // No easing (t === rawT), so elapsed = t * duration gives true wall-clock seconds
                     // for the sine frequency calculation. Amplitude decays linearly from intensity → 0.
-                    this._animate(uri, duration, undefined, (t) => {
-                        const elapsed = t * duration;
-                        const amplitude = intensity * (1 - t); // linear decay
+                    this._animate(
+                        uri,
+                        duration,
+                        undefined,
+                        (t) => {
+                            const elapsed = t * duration;
+                            const amplitude = intensity * (1 - t); // linear decay
 
-                        // Three-layer sinusoids at different frequencies and phases for an organic feel.
-                        const dx =
-                            amplitude *
-                            (Math.sin(elapsed * frequency * TAU) * 0.6 +
-                                Math.sin(elapsed * frequency * 2.7 * TAU + 1.23) * 0.3 +
-                                Math.sin(elapsed * frequency * 5.1 * TAU + 2.45) * 0.1);
-                        const dy =
-                            amplitude *
-                            (Math.sin(elapsed * frequency * 0.9 * TAU + 0.5) * 0.5 +
-                                Math.sin(elapsed * frequency * 2.1 * TAU + 1.87) * 0.35 +
-                                Math.sin(elapsed * frequency * 4.3 * TAU + 3.14) * 0.15);
+                            // Three-layer sinusoids at different frequencies and phases for an organic feel.
+                            const dx =
+                                amplitude *
+                                (Math.sin(elapsed * frequency * TAU) * 0.6 +
+                                    Math.sin(elapsed * frequency * 2.7 * TAU + 1.23) * 0.3 +
+                                    Math.sin(elapsed * frequency * 5.1 * TAU + 2.45) * 0.1);
+                            const dy =
+                                amplitude *
+                                (Math.sin(elapsed * frequency * 0.9 * TAU + 0.5) * 0.5 +
+                                    Math.sin(elapsed * frequency * 2.1 * TAU + 1.87) * 0.35 +
+                                    Math.sin(elapsed * frequency * 4.3 * TAU + 3.14) * 0.15);
 
-                        const shakeTarget = new Vector3(baseTarget.x + dx, baseTarget.y + dy, baseTarget.z);
+                            const shakeTarget = new Vector3(baseTarget.x + dx, baseTarget.y + dy, baseTarget.z);
 
-                        if (cam instanceof ArcRotateCamera) {
-                            // Direct modification to avoid rebuildAnglesAndRadius().
-                            // This oscillates the orbit centre, producing physical camera movement.
-                            cam.target.copyFrom(shakeTarget);
-                        } else {
-                            cam.setTarget(shakeTarget);
+                            if (cam instanceof ArcRotateCamera) {
+                                // Direct modification to avoid rebuildAnglesAndRadius().
+                                // This oscillates the orbit centre, producing physical camera movement.
+                                cam.target.copyFrom(shakeTarget);
+                            } else {
+                                cam.setTarget(shakeTarget);
+                            }
+                        },
+                        () => {
+                            // Restore the original look-at point on completion.
+                            if (cam instanceof ArcRotateCamera) {
+                                cam.target.copyFrom(baseTarget);
+                            } else {
+                                cam.setTarget(baseTarget);
+                            }
+                            resolve(McpToolResults.text(`Camera "${cam.name}" shake complete.`));
                         }
-                    }, () => {
-                        // Restore the original look-at point on completion.
-                        if (cam instanceof ArcRotateCamera) {
-                            cam.target.copyFrom(baseTarget);
-                        } else {
-                            cam.setTarget(baseTarget);
-                        }
-                        resolve(McpToolResults.text(`Camera "${cam.name}" shake complete.`));
-                    });
+                    );
                 });
             }
 
@@ -739,11 +778,7 @@ export class McpCameraAdapter extends McpAdapterBase {
             case McpCameraBehavior.CameraStopAnimationFn: {
                 const wasRunning = this._activeAnimations.has(uri);
                 this._stopAnimation(uri);
-                return McpToolResults.text(
-                    wasRunning
-                        ? `Camera "${camera.name}" animation stopped.`
-                        : `Camera "${camera.name}" had no active animation.`
-                );
+                return McpToolResults.text(wasRunning ? `Camera "${camera.name}" animation stopped.` : `Camera "${camera.name}" had no active animation.`);
             }
 
             // -----------------------------------------------------------------
@@ -835,13 +870,7 @@ export class McpCameraAdapter extends McpAdapterBase {
      *
      * Any existing animation registered for `uri` is cancelled first.
      */
-    private _animate(
-        uri: string,
-        durationSecs: number,
-        easingStr: string | undefined,
-        onFrame: (easedT: number) => void,
-        onComplete?: () => void
-    ): void {
+    private _animate(uri: string, durationSecs: number, easingStr: string | undefined, onFrame: (easedT: number) => void, onComplete?: () => void): void {
         this._stopAnimation(uri);
         const easingFn = this._createEasingFunction(easingStr);
         let elapsed = 0;
@@ -919,21 +948,45 @@ export class McpCameraAdapter extends McpAdapterBase {
 
         let easing: EasingFunction;
         switch (type) {
-            case "sine":    easing = new SineEase();          break;
-            case "quad":    easing = new QuadraticEase();     break;
-            case "cubic":   easing = new CubicEase();         break;
-            case "circle":  easing = new CircleEase();        break;
-            case "expo":    easing = new ExponentialEase();   break;
-            case "back":    easing = new BackEase();          break;
-            case "bounce":  easing = new BounceEase();        break;
-            case "elastic": easing = new ElasticEase();       break;
-            default:        easing = new SineEase();          break;
+            case "sine":
+                easing = new SineEase();
+                break;
+            case "quad":
+                easing = new QuadraticEase();
+                break;
+            case "cubic":
+                easing = new CubicEase();
+                break;
+            case "circle":
+                easing = new CircleEase();
+                break;
+            case "expo":
+                easing = new ExponentialEase();
+                break;
+            case "back":
+                easing = new BackEase();
+                break;
+            case "bounce":
+                easing = new BounceEase();
+                break;
+            case "elastic":
+                easing = new ElasticEase();
+                break;
+            default:
+                easing = new SineEase();
+                break;
         }
 
         switch (mode) {
-            case "in":    easing.setEasingMode(EasingFunction.EASINGMODE_EASEIN);    break;
-            case "out":   easing.setEasingMode(EasingFunction.EASINGMODE_EASEOUT);   break;
-            default:      easing.setEasingMode(EasingFunction.EASINGMODE_EASEINOUT); break;
+            case "in":
+                easing.setEasingMode(EasingFunction.EASINGMODE_EASEIN);
+                break;
+            case "out":
+                easing.setEasingMode(EasingFunction.EASINGMODE_EASEOUT);
+                break;
+            default:
+                easing.setEasingMode(EasingFunction.EASINGMODE_EASEINOUT);
+                break;
         }
 
         return easing;

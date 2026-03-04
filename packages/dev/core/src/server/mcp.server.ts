@@ -465,7 +465,7 @@ export class McpServer implements IMcpServer, IMcpServerHandlers {
                 // segment wildcard.  Anchors ensure the whole URI must match.
                 const pattern = uriTemplate
                     .replace(/[.*+?^${}()|[\]\\]/g, "\\$&") // escape special chars
-                    .replace(/\\\{[^}]+\\\}/g, "[^/]+");     // un-escape & expand {var}
+                    .replace(/\\\{[^}]+\\\}/g, "[^/]+"); // un-escape & expand {var}
                 if (new RegExp(`^${pattern}$`).test(uri)) {
                     return behavior;
                 }
@@ -478,7 +478,7 @@ export class McpServer implements IMcpServer, IMcpServerHandlers {
     private async _callTool(req: JsonRpcRequest, instance: IMcpRuntimeOperations, uri: string, name: string, args: Record<string, unknown>): Promise<JsonRpcResponse> {
         try {
             const result = await instance.executeToolAsync(uri, name, args);
-            return Mcp.toolCallResult(req.id, JSON.stringify(result));
+            return Mcp.toolCallResult(req.id, result);
         } catch (err) {
             return Mcp.internalError(req.id, err instanceof Error ? err.message : "Internal error");
         }

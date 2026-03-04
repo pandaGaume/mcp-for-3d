@@ -15,6 +15,11 @@
  * | MCP_TUNNEL_NO_OPEN         | (set to any value to skip auto-launch)  |
  * | MCP_TUNNEL_TLS_CERT        | (path to PEM certificate — enables TLS) |
  * | MCP_TUNNEL_TLS_KEY         | (path to PEM private key — enables TLS) |
+ * | MCP_TUNNEL_PROTOCOL        | "http" to force plain HTTP even when    |
+ * |                            | cert+key are present; "https" to force  |
+ * |                            | HTTPS (fails if cert+key are missing);  |
+ * |                            | omit for auto (HTTPS when cert+key are  |
+ * |                            | set, HTTP otherwise).                   |
  *
  * Populate packages/host/www/bundle/ by running:
  *   npm run build:all        (TypeScript + webpack production + deploy)
@@ -69,6 +74,28 @@ const ssePath = "/sse"; // Not currently configurable since it's hardcoded in th
 const tlsCertFile = process.env["MCP_TUNNEL_TLS_CERT"];
 const tlsKeyFile  = process.env["MCP_TUNNEL_TLS_KEY"];
 
+// Protocol override: "http" | "https" | undefined (auto)
+const protocolOverride = process.env["MCP_TUNNEL_PROTOCOL"]?.toLowerCase();
+if (protocolOverride !== undefined && protocolOverride !== "http" && protocolOverride !== "https") {
+    console.error(`[MCP Tunnel] Invalid MCP_TUNNEL_PROTOCOL="${protocolOverride}". Use "http" or "https".`);
+    process.exit(1);
+}
+if (protocolOverride === "https" && (!tlsCertFile || !tlsKeyFile)) {
+    console.error("[MCP Tunnel] MCP_TUNNEL_PROTOCOL=https requires MCP_TUNNEL_TLS_CERT and MCP_TUNNEL_TLS_KEY.");
+    process.exit(1);
+}
+
+/**
+ * Whether to enable TLS:
+ *  - "http"  → never (ignores cert/key even if present)
+ *  - "https" → always (cert+key required, validated above)
+ *  - auto    → yes when both cert and key env vars are set
+ */
+const useTls =
+    protocolOverride === "http"  ? false :
+    protocolOverride === "https" ? true  :
+    !!(tlsCertFile && tlsKeyFile);
+
 // Default paths assume this binary is dist/bin.js inside packages/dev/tunnel/
 //   __dist/../../../host/www         → packages/host/www
 //   __dist/../../../host/www/bundle  → packages/host/www/bundle  (all bundles aggregated here)
@@ -89,10 +116,10 @@ async function main(): Promise<void> {
         builder.withHost(host);
     }
 
-    if (tlsCertFile && tlsKeyFile) {
+    if (useTls) {
         builder.withTlsFiles(
-            path.resolve(initCwd, tlsCertFile),
-            path.resolve(initCwd, tlsKeyFile),
+            path.resolve(initCwd, tlsCertFile!),
+            path.resolve(initCwd, tlsKeyFile!),
         );
     }
 
@@ -109,9 +136,8 @@ async function main(): Promise<void> {
     await tunnel.start();
 
     // ── Styled startup banner ──────────────────────────────────────────────
-    const isTls     = !!(tlsCertFile && tlsKeyFile);
-    const httpScheme = isTls ? "https" : "http";
-    const wsScheme   = isTls ? "wss"   : "ws";
+    const httpScheme = useTls ? "https" : "http";
+    const wsScheme   = useTls ? "wss"   : "ws";
     const hr = "─".repeat(64);
     const localhost = `${httpScheme}://localhost:${port}`;
     const hasWww = fs.existsSync(wwwDir);
@@ -119,7 +145,7 @@ async function main(): Promise<void> {
     const sseSuffix = ssePath.replace(/^\//, "");
 
     console.log();
-    console.log(`⚙️  MCP for Babylon — multi-provider tunnel started${isTls ? " (TLS)" : ""}`);
+    console.log(`⚙️  MCP for Babylon — multi-provider tunnel started${useTls ? " (TLS)" : ""}`);
     console.log(hr);
     console.log(`📡  Provider WebSocket   ${wsScheme}://localhost:${port}${providerPath}/<serverName>`);
     console.log(`🔌  MCP Inspector (HTTP) ${localhost}/<serverName>/${mcpSuffix}`);

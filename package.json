@@ -17,6 +17,7 @@
     "lint-staged": "^15.0.0",
     "prettier": "^3.2.0",
     "rimraf": "~6.0.1",
+    "cross-env": "^7.0.3",
     "selfsigned": "^2.4.1",
     "typescript": "^5.4.0"
   },
@@ -45,6 +46,8 @@
     "build:all:dev": "npm run build:dev && npm run bundle:dev && npm run deploy:bundles",
     "server:build": "npm run build --workspace=@dev/tunnel",
     "server:start": "npm run server:build && npm run start --workspace=@dev/tunnel",
+    "server:start:http": "npm run server:build && cross-env MCP_TUNNEL_PROTOCOL=http npm run start --workspace=@dev/tunnel",
+    "server:start:https": "npm run server:build && cross-env MCP_TUNNEL_PROTOCOL=https MCP_TUNNEL_TLS_CERT=certs/cert.pem MCP_TUNNEL_TLS_KEY=certs/key.pem npm run start --workspace=@dev/tunnel",
     "gen-cert": "node scripts/gen-cert.mjs"
   },
   "engines": {
