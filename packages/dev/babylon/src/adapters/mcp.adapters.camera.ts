@@ -1,21 +1,28 @@
 import {
+    AbstractMesh,
     ArcRotateCamera,
     BackEase,
     BounceEase,
     Camera,
     CircleEase,
+    Color3,
     CubicEase,
     EasingFunction,
     ElasticEase,
     Engine,
     EventState,
     ExponentialEase,
+    Frustum,
+    InstancedMesh,
     Matrix,
     Nullable,
     Observer,
+    PBRMaterial,
     QuadraticEase,
     Scene,
     SineEase,
+    StandardMaterial,
+    Tags,
     TargetCamera,
     Tools,
     Vector3,
@@ -23,7 +30,7 @@ import {
 import { JsonRpcMimeType, McpAdapterBase, McpResourceContent, McpToolResult, McpToolResults } from "@dev/core";
 import { McpCameraBehavior } from "../behaviours";
 import { McpBabylonDomain, McpCameraResourceUriPrefix } from "../mcp.commons";
-import { ICameraState, IFrustum } from "../states";
+import { ICameraState, IFrustum, IScenePickResult, ISceneVisibleObjectsState, IVisibleObjectMaterialState, IVisibleObjectState, MaterialType, MeshShapeHint, VisibleObjectIncludeField, VisibleObjectSortBy } from "../states";
 
 const DEG_TO_RAD = Math.PI / 180;
 const RAD_TO_DEG = 180 / Math.PI;
@@ -47,6 +54,8 @@ const ALL_TOOLS = [
     McpCameraBehavior.CameraFollowPathFn,
     McpCameraBehavior.CameraShakeFn,
     McpCameraBehavior.CameraStopAnimationFn,
+    McpCameraBehavior.SceneVisibleObjectsFn,
+    McpCameraBehavior.ScenePickFromCenterFn,
 ].join('", "');
 
 /**
@@ -782,6 +791,20 @@ export class McpCameraAdapter extends McpAdapterBase {
             }
 
             // -----------------------------------------------------------------
+            // scene.visibleObjects
+            // -----------------------------------------------------------------
+            case McpCameraBehavior.SceneVisibleObjectsFn: {
+                return McpToolResults.json(this._handleSceneVisibleObjects(camera, args));
+            }
+
+            // -----------------------------------------------------------------
+            // scene.pickFromCenter
+            // -----------------------------------------------------------------
+            case McpCameraBehavior.ScenePickFromCenterFn: {
+                return McpToolResults.json(this._handleScenePickFromCenter(camera, args));
+            }
+
+            // -----------------------------------------------------------------
             // Unknown
             // -----------------------------------------------------------------
             default: {
@@ -990,6 +1013,287 @@ export class McpCameraAdapter extends McpAdapterBase {
         }
 
         return easing;
+    }
+
+    // -------------------------------------------------------------------------
+    // Scene query helpers
+    // -------------------------------------------------------------------------
+
+    /**
+     * Returns a structured description of all meshes visible from {@link camera}.
+     *
+     * Filtering pipeline:
+     *  1. Skip disabled / invisible meshes with no geometry.
+     *  2. Skip meshes not in the camera frustum.
+     *  3. Apply optional layerMask, onlyPickable and minScreenCoverage filters.
+     *  4. Sort by distance | screenCoverage | name.
+     *  5. Truncate to maxObjects.
+     */
+    private _handleSceneVisibleObjects(camera: Camera, args: Record<string, unknown>): ISceneVisibleObjectsState {
+        const maxObjects = typeof args["maxObjects"] === "number" && args["maxObjects"] > 0 ? Math.floor(args["maxObjects"]) : 50;
+        const include = Array.isArray(args["include"]) ? (args["include"] as VisibleObjectIncludeField[]) : [];
+        const onlyPickable = args["onlyPickable"] === true;
+        const minScreenCoverage = typeof args["minScreenCoverage"] === "number" ? args["minScreenCoverage"] : 0.001;
+        const layerMask = typeof args["layerMask"] === "number" ? args["layerMask"] : undefined;
+        const sortBy: VisibleObjectSortBy = (args["sortBy"] as VisibleObjectSortBy) ?? "distance";
+
+        const includeAll = include.length === 0;
+        const wants = (field: VisibleObjectIncludeField) => includeAll || include.includes(field);
+
+        const zSign = this._scene.useRightHandedSystem ? 1 : -1;
+        const engine = this._scene.getEngine();
+        const renderWidth = engine.getRenderWidth();
+        const renderHeight = engine.getRenderHeight();
+        const transformMatrix = camera.getTransformationMatrix();
+        const viewport = camera.viewport.toGlobal(renderWidth, renderHeight);
+        const frustumPlanes = Frustum.GetPlanes(transformMatrix);
+        const camPos = camera.position;
+
+        const visible: IVisibleObjectState[] = [];
+        let filteredOut = 0;
+
+        for (const mesh of this._scene.meshes) {
+            // Basic eligibility: must be enabled, visible and have geometry.
+            if (!mesh.isEnabled() || !mesh.isVisible || mesh.getTotalVertices() === 0) {
+                filteredOut++;
+                continue;
+            }
+            // Frustum test.
+            if (!mesh.isInFrustum(frustumPlanes)) {
+                filteredOut++;
+                continue;
+            }
+            // Optional layer mask filter.
+            if (layerMask !== undefined && (mesh.layerMask & layerMask) === 0) {
+                filteredOut++;
+                continue;
+            }
+            // Optional pickable filter.
+            if (onlyPickable && !mesh.isPickable) {
+                filteredOut++;
+                continue;
+            }
+
+            const bi = mesh.getBoundingInfo();
+            const center = bi.boundingSphere.centerWorld;
+            const distance = Vector3.Distance(camPos, center);
+
+            // Screen-space bounding box via projection of world-space corners.
+            let screenX: number | undefined;
+            let screenY: number | undefined;
+            let screenW: number | undefined;
+            let screenH: number | undefined;
+            let screenCoverage: number | undefined;
+
+            const corners = bi.boundingBox.vectorsWorld;
+            if (corners.length > 0) {
+                let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+                const identity = Matrix.Identity();
+                for (const corner of corners) {
+                    const proj = Vector3.Project(corner, identity, transformMatrix, viewport);
+                    if (proj.x < minX) minX = proj.x;
+                    if (proj.y < minY) minY = proj.y;
+                    if (proj.x > maxX) maxX = proj.x;
+                    if (proj.y > maxY) maxY = proj.y;
+                }
+                screenX = minX / renderWidth;
+                screenY = minY / renderHeight;
+                screenW = (maxX - minX) / renderWidth;
+                screenH = (maxY - minY) / renderHeight;
+                screenCoverage = screenW * screenH;
+            }
+
+            // Screen coverage filter.
+            if (screenCoverage !== undefined && screenCoverage < minScreenCoverage) {
+                filteredOut++;
+                continue;
+            }
+
+            const entry: IVisibleObjectState = {
+                id: mesh.id,
+                name: mesh.name,
+                type: mesh instanceof InstancedMesh ? "instancedMesh" : "mesh",
+                shapeHint: this._getShapeHint(mesh),
+                distance,
+            };
+
+            if (wants("transform")) {
+                entry.position = { x: center.x, y: center.y, z: center.z * zSign };
+            }
+
+            if (wants("bounds")) {
+                const bbMin = bi.boundingBox.minimumWorld;
+                const bbMax = bi.boundingBox.maximumWorld;
+                entry.bounds = {
+                    worldMin: { x: bbMin.x, y: bbMin.y, z: bbMin.z * zSign },
+                    worldMax: { x: bbMax.x, y: bbMax.y, z: bbMax.z * zSign },
+                    screenX,
+                    screenY,
+                    screenW,
+                    screenH,
+                    screenCoverage,
+                };
+            }
+
+            if (wants("material") || wants("color")) {
+                entry.material = this._getMaterialState(mesh);
+            }
+
+            if (wants("visibility")) {
+                entry.visibility = {
+                    isEnabled: mesh.isEnabled(),
+                    isVisible: mesh.isVisible,
+                    isInFrustum: true, // already tested above
+                    visibility: mesh.visibility,
+                };
+                entry.flags = {
+                    pickable: mesh.isPickable,
+                    castsShadows: mesh.receiveShadows, // no direct cast getter; use what's available
+                    receivesShadows: mesh.receiveShadows,
+                };
+            }
+
+            if (wants("tags")) {
+                const tagStr = Tags.GetTags(mesh, true);
+                entry.tags = tagStr ? (tagStr as string).split(" ").filter(Boolean) : [];
+            }
+
+            visible.push(entry);
+        }
+
+        // Sort.
+        visible.sort((a, b) => {
+            if (sortBy === "screenCoverage") {
+                const ca = a.bounds?.screenCoverage ?? 0;
+                const cb = b.bounds?.screenCoverage ?? 0;
+                return cb - ca; // largest first
+            }
+            if (sortBy === "name") return a.name.localeCompare(b.name);
+            return a.distance - b.distance; // closest first (default)
+        });
+
+        // Truncate.
+        const truncated = visible.splice(maxObjects);
+        filteredOut += truncated.length;
+
+        // Camera summary.
+        let bjsFwd: Vector3;
+        if (camera instanceof TargetCamera) {
+            bjsFwd = camera.target.subtract(camPos);
+        } else {
+            bjsFwd = Vector3.TransformNormal(new Vector3(0, 0, 1), camera.getWorldMatrix());
+        }
+        bjsFwd.normalize();
+
+        const cameraInfo = {
+            name: camera.name,
+            position: { x: camPos.x, y: camPos.y, z: camPos.z * zSign },
+            forward: { x: bjsFwd.x, y: bjsFwd.y, z: bjsFwd.z * zSign },
+            ...(camera.mode === Camera.PERSPECTIVE_CAMERA ? { fov: camera.fov } : {}),
+        };
+
+        return {
+            camera: cameraInfo,
+            visible,
+            stats: { count: visible.length, filteredOut },
+        };
+    }
+
+    /**
+     * Casts a picking ray from {@link camera} through a normalized screen point
+     * and returns the first mesh hit.
+     */
+    private _handleScenePickFromCenter(camera: Camera, args: Record<string, unknown>): IScenePickResult {
+        const zSign = this._scene.useRightHandedSystem ? 1 : -1;
+        const engine = this._scene.getEngine();
+        const renderWidth = engine.getRenderWidth();
+        const renderHeight = engine.getRenderHeight();
+
+        const spArg = args["screenPoint"] as { x?: number; y?: number } | undefined;
+        const normX = typeof spArg?.x === "number" ? spArg.x : 0.5;
+        const normY = typeof spArg?.y === "number" ? spArg.y : 0.5;
+        const maxDist = typeof args["maxDistance"] === "number" && args["maxDistance"] > 0 ? args["maxDistance"] : undefined;
+
+        const pxX = normX * renderWidth;
+        const pxY = normY * renderHeight;
+
+        const predicate = maxDist
+            ? (mesh: AbstractMesh) => {
+                  const d = Vector3.Distance(camera.position, mesh.getBoundingInfo().boundingSphere.centerWorld);
+                  return d <= maxDist;
+              }
+            : undefined;
+
+        const pickInfo = this._scene.pick(pxX, pxY, predicate, false, camera);
+
+        if (!pickInfo?.hit || !pickInfo.pickedMesh) {
+            return { hit: false };
+        }
+
+        const result: IScenePickResult = {
+            hit: true,
+            meshId: pickInfo.pickedMesh.id,
+            meshName: pickInfo.pickedMesh.name,
+        };
+
+        if (pickInfo.pickedPoint) {
+            const pt = pickInfo.pickedPoint;
+            result.pickedPoint = { x: pt.x, y: pt.y, z: pt.z * zSign };
+            result.distance = Vector3.Distance(camera.position, pickInfo.pickedPoint);
+        }
+
+        const normal = pickInfo.getNormal(true, true);
+        if (normal) {
+            result.normal = { x: normal.x, y: normal.y, z: normal.z * zSign };
+        }
+
+        if (pickInfo.faceId >= 0) {
+            result.faceId = pickInfo.faceId;
+        }
+
+        return result;
+    }
+
+    /** Best-effort shape classification: checks mesh metadata first, then falls back to name keywords. */
+    private _getShapeHint(mesh: AbstractMesh): MeshShapeHint {
+        if (mesh.metadata?.shapeHint) return mesh.metadata.shapeHint as MeshShapeHint;
+        const lower = mesh.name.toLowerCase();
+        if (/sphere|ball/.test(lower)) return "sphere";
+        if (/box|cube/.test(lower)) return "box";
+        if (/plane|ground|floor/.test(lower)) return "plane";
+        if (/cylinder|tube|pipe/.test(lower)) return "cylinder";
+        if (/torus|ring/.test(lower)) return "torus";
+        return "unknown";
+    }
+
+    /**
+     * Extracts a material description from the mesh.
+     * Handles {@link StandardMaterial} (diffuseColor) and {@link PBRMaterial} (albedoColor).
+     */
+    private _getMaterialState(mesh: AbstractMesh): IVisibleObjectMaterialState | undefined {
+        const mat = mesh.material;
+        if (!mat) return undefined;
+
+        let type: MaterialType = "other";
+        let baseColor: { r: number; g: number; b: number } | undefined;
+        let hasTexture: boolean | undefined;
+
+        if (mat instanceof StandardMaterial) {
+            type = "standard";
+            const c = mat.diffuseColor ?? Color3.White();
+            baseColor = { r: c.r, g: c.g, b: c.b };
+            hasTexture = mat.diffuseTexture !== null;
+        } else if (mat instanceof PBRMaterial) {
+            type = "pbr";
+            const c = mat.albedoColor ?? Color3.White();
+            baseColor = { r: c.r, g: c.g, b: c.b };
+            hasTexture = mat.albedoTexture !== null;
+        } else {
+            const className = mat.getClassName();
+            if (className === "NodeMaterial") type = "node";
+        }
+
+        return { name: mat.name, type, baseColor, hasTexture };
     }
 
     /**
