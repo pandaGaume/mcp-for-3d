@@ -6,6 +6,7 @@
         "sourceType": "module",
         "project": [
             "./packages/dev/core/tsconfig.build.json",
+            "./packages/dev/geodesy/tsconfig.build.json",
             "./packages/dev/behaviors/tsconfig.build.json",
             "./packages/dev/babylon/tsconfig.build.json",
             "./packages/dev/cesium/tsconfig.build.json",

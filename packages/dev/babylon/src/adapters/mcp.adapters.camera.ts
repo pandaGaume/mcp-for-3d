@@ -42,6 +42,7 @@ import {
     VisibleObjectIncludeField,
     VisibleObjectSortBy,
 } from "@dev/behaviors";
+import { GeodeticSystem } from "@dev/geodesy";
 import { McpBabylonDomain, McpCameraResourceUriPrefix } from "../mcp.commons";
 
 const DEG_TO_RAD = Math.PI / 180;
@@ -869,6 +870,24 @@ export class McpCameraAdapter extends McpAdapterBase {
     }
 
     /**
+     * Optional geodetic system for geographic coordinate support.
+     * When set (e.g. by a geographic camera plugin), geographic coordinates
+     * `{lat, lon, alt}` are converted to scene-space Cartesian automatically.
+     * When not set, geographic coordinates are rejected with a clear error.
+     */
+    private _geodeticSystem?: GeodeticSystem;
+
+    /** Set the geodetic system for geographic coordinate conversion. */
+    public set geodeticSystem(system: GeodeticSystem | undefined) {
+        this._geodeticSystem = system;
+    }
+
+    /** Get the current geodetic system, if any. */
+    public get geodeticSystem(): GeodeticSystem | undefined {
+        return this._geodeticSystem;
+    }
+
+    /**
      * Converts a right-handed y-up input vector to a Babylon.js internal Vector3.
      * When the scene uses the default left-handed system, Z is negated.
      */
@@ -883,11 +902,11 @@ export class McpCameraAdapter extends McpAdapterBase {
         return typeof o["x"] === "number" && typeof o["y"] === "number" && typeof o["z"] === "number" && isFinite(o["x"]) && isFinite(o["y"]) && isFinite(o["z"]);
     }
 
-    /** Builds a standardised argument-validation error for vec3 parameters. */
+    /** Builds a standardised argument-validation error for coordinate parameters. */
     private _vec3Error(toolName: string, paramName: string, received: unknown): McpToolResult {
         return McpToolResults.error(
             `Invalid "${paramName}" argument for "${toolName}". ` +
-                `Expected an object with finite numeric fields x, y, z (right-handed y-up). ` +
+                `Expected { x, y, z } (right-handed y-up)${this._geodeticSystem ? " or { lat, lon, alt? } (WGS84 degrees)" : ""}. ` +
                 `Received: ${JSON.stringify(received)}`
         );
     }

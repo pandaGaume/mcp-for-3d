@@ -1,18 +1,12 @@
 {
     "extends": "../../../tsconfig.build.json",
-
     "compilerOptions": {
         "composite": true,
         "outDir": "./dist",
         "rootDir": "./src",
         "skipLibCheck": true
     },
-
-    "references": [
-        { "path": "../core/tsconfig.build.json" },
-        { "path": "../geodesy/tsconfig.build.json" }
-    ],
-
+    "references": [],
     "include": ["./src/**/*.ts", "./src/**/*.tsx"],
     "exclude": ["**/node_modules", "**/dist"]
 }

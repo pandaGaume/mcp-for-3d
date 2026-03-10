@@ -68,6 +68,7 @@ import {
 } from "cesium";
 import { JsonRpcMimeType, McpAdapterBase, McpResourceContent, McpToolResult, McpToolResults, ToolSupport } from "@dev/core";
 import { ICameraState, IFrustum, IScenePickHit, IScenePickResult, ISceneVisibleObjectsState, IVisibleObjectState, McpCameraBehavior } from "@dev/behaviors";
+import { resolveToCartesian3 } from "@dev/geodesy";
 import { McpCesiumDomain, McpCameraResourceUriPrefix } from "../mcp.commons";
 
 // ---------------------------------------------------------------------------
@@ -285,8 +286,8 @@ export class McpCameraAdapter extends McpAdapterBase {
             // camera_set_target
             // -----------------------------------------------------------------
             case McpCameraBehavior.CameraSetTargetFn: {
-                const target = args["target"] as { x: number; y: number; z: number } | undefined;
-                if (!this._isVec3(target)) {
+                const target = this._resolveCoordinate(args["target"]);
+                if (!target) {
                     return this._vec3Error(toolName, "target", args["target"]);
                 }
                 const cartTarget = this._toCartesian3(target);
@@ -306,8 +307,8 @@ export class McpCameraAdapter extends McpAdapterBase {
             // camera_set_position
             // -----------------------------------------------------------------
             case McpCameraBehavior.CameraSetPositionFn: {
-                const position = args["position"] as { x: number; y: number; z: number } | undefined;
-                if (!this._isVec3(position)) {
+                const position = this._resolveCoordinate(args["position"]);
+                if (!position) {
                     return this._vec3Error(toolName, "position", args["position"]);
                 }
                 camera.position = this._toCartesian3(position);
@@ -318,10 +319,10 @@ export class McpCameraAdapter extends McpAdapterBase {
             // camera_look_at
             // -----------------------------------------------------------------
             case McpCameraBehavior.CameraLookAtFn: {
-                const position = args["position"] as { x: number; y: number; z: number } | undefined;
-                const target = args["target"] as { x: number; y: number; z: number } | undefined;
-                if (!this._isVec3(position)) return this._vec3Error(toolName, "position", args["position"]);
-                if (!this._isVec3(target)) return this._vec3Error(toolName, "target", args["target"]);
+                const position = this._resolveCoordinate(args["position"]);
+                const target = this._resolveCoordinate(args["target"]);
+                if (!position) return this._vec3Error(toolName, "position", args["position"]);
+                if (!target) return this._vec3Error(toolName, "target", args["target"]);
 
                 const cartTarget = this._toCartesian3(target);
                 const cartPosition = this._toCartesian3(position);
@@ -543,14 +544,14 @@ export class McpCameraAdapter extends McpAdapterBase {
             // camera_animate_to
             // -----------------------------------------------------------------
             case McpCameraBehavior.CameraAnimateToFn: {
-                const posArg = args["position"] as { x: number; y: number; z: number } | undefined;
-                const tgtArg = args["target"] as { x: number; y: number; z: number } | undefined;
+                const posArg = args["position"] !== undefined ? this._resolveCoordinate(args["position"]) : undefined;
+                const tgtArg = args["target"] !== undefined ? this._resolveCoordinate(args["target"]) : undefined;
                 const fovArg = args["fov"] as number | undefined;
                 const duration = typeof args["duration"] === "number" && args["duration"] > 0 ? args["duration"] : 1;
                 const easingStr = args["easing"] as string | undefined;
 
-                if (posArg !== undefined && !this._isVec3(posArg)) return this._vec3Error(toolName, "position", posArg);
-                if (tgtArg !== undefined && !this._isVec3(tgtArg)) return this._vec3Error(toolName, "target", tgtArg);
+                if (args["position"] !== undefined && !posArg) return this._vec3Error(toolName, "position", args["position"]);
+                if (args["target"] !== undefined && !tgtArg) return this._vec3Error(toolName, "target", args["target"]);
 
                 const endPos = posArg ? this._toCartesian3(posArg) : undefined;
                 const endTarget = tgtArg ? this._toCartesian3(tgtArg) : undefined;
@@ -666,12 +667,14 @@ export class McpCameraAdapter extends McpAdapterBase {
                 for (let i = 0; i < waypointsArg.length; i++) {
                     const wp = waypointsArg[i];
                     if (wp.position !== undefined) {
-                        if (!this._isVec3(wp.position)) return this._vec3Error(toolName, `waypoints[${i}].position`, wp.position);
-                        lastPos = this._toCartesian3(wp.position);
+                        const resolved = this._resolveCoordinate(wp.position);
+                        if (!resolved) return this._vec3Error(toolName, `waypoints[${i}].position`, wp.position);
+                        lastPos = this._toCartesian3(resolved);
                     }
                     if (wp.target !== undefined) {
-                        if (!this._isVec3(wp.target)) return this._vec3Error(toolName, `waypoints[${i}].target`, wp.target);
-                        lastTgt = this._toCartesian3(wp.target);
+                        const resolved = this._resolveCoordinate(wp.target);
+                        if (!resolved) return this._vec3Error(toolName, `waypoints[${i}].target`, wp.target);
+                        lastTgt = this._toCartesian3(resolved);
                     }
                     positions.push(Cartesian3.clone(lastPos, new Cartesian3()));
                     targets.push(Cartesian3.clone(lastTgt, new Cartesian3()));
@@ -802,6 +805,17 @@ export class McpCameraAdapter extends McpAdapterBase {
      * are both right-handed. The consumer provides positions in metres from
      * Earth's centre.
      */
+    /**
+     * Resolves an MCP coordinate argument to `{x, y, z}`.
+     * Accepts either Cartesian `{x,y,z}` or geographic `{lat,lon,alt?}` (WGS84 → ECEF).
+     */
+    private _resolveCoordinate(v: unknown): { x: number; y: number; z: number } | undefined {
+        if (!v || typeof v !== "object") return undefined;
+        const resolved = resolveToCartesian3(v as Record<string, unknown>);
+        if (!resolved || !isFinite(resolved.x) || !isFinite(resolved.y) || !isFinite(resolved.z)) return undefined;
+        return resolved;
+    }
+
     private _toCartesian3(v: { x: number; y: number; z: number }): Cartesian3 {
         return new Cartesian3(v.x, v.y, v.z);
     }
@@ -811,25 +825,11 @@ export class McpCameraAdapter extends McpAdapterBase {
         return { x: c.x, y: c.y, z: c.z };
     }
 
-    /** Returns true when `v` is a non-null object with finite numeric x, y, z fields. */
-    private _isVec3(v: unknown): v is { x: number; y: number; z: number } {
-        if (!v || typeof v !== "object") return false;
-        const o = v as Record<string, unknown>;
-        return (
-            typeof o["x"] === "number" &&
-            typeof o["y"] === "number" &&
-            typeof o["z"] === "number" &&
-            isFinite(o["x"] as number) &&
-            isFinite(o["y"] as number) &&
-            isFinite(o["z"] as number)
-        );
-    }
-
-    /** Builds a standardised argument-validation error for vec3 parameters. */
+    /** Builds a standardised argument-validation error for coordinate parameters. */
     private _vec3Error(toolName: string, paramName: string, received: unknown): McpToolResult {
         return McpToolResults.error(
             `Invalid "${paramName}" argument for "${toolName}". ` +
-                `Expected an object with finite numeric fields x, y, z (ECEF metres). ` +
+                `Expected { x, y, z } (ECEF metres) or { lat, lon, alt? } (WGS84 degrees). ` +
                 `Received: ${JSON.stringify(received)}`
         );
     }

@@ -1,4 +1,5 @@
 import { IMcpBehaviorAdapter, JsonRpcMimeType, McpBehavior, McpBehaviorOptions, McpResource, McpResourceTemplate, McpTool } from "@dev/core";
+import { coordinateSchema } from "@dev/geodesy";
 import { McpCameraNamespace } from "../mcp.commons";
 
 export class McpCameraBehavior extends McpBehavior {
@@ -93,16 +94,8 @@ export class McpCameraBehavior extends McpBehavior {
                 "Examples: 'sine.inout', 'elastic.out', 'bounce.out', 'back.in'.",
         };
 
-        const vec3 = {
-            type: "object",
-            properties: {
-                x: { type: "number" },
-                y: { type: "number" },
-                z: { type: "number" },
-            },
-            required: ["x", "y", "z"],
-            additionalProperties: false,
-        };
+        // Coordinate schema accepting both Cartesian {x,y,z} and geographic {lat,lon,alt?}.
+        const coord = coordinateSchema;
 
         return [
             // -----------------------------------------------------------------
@@ -110,12 +103,14 @@ export class McpCameraBehavior extends McpBehavior {
             // -----------------------------------------------------------------
             {
                 name: McpCameraBehavior.CameraSetTargetFn,
-                description: "Sets the camera look-at point by calling TargetCamera.setTarget(). " + "Coordinates are world-space, right-handed system, y-axis up.",
+                description:
+                    "Sets the camera look-at point by calling TargetCamera.setTarget(). " +
+                    "Accepts Cartesian {x,y,z} (right-handed y-up) or geographic {lat,lon,alt?} (WGS84 degrees).",
                 inputSchema: {
                     type: "object",
                     properties: {
                         uri: { type: "string", description: "Camera URI, e.g. babylon://camera/MyCamera" },
-                        target: { ...vec3, description: "World-space look-at point (right-handed y-up)." },
+                        target: { ...coord, description: "World-space look-at point. Cartesian {x,y,z} or geographic {lat,lon,alt?}." },
                     },
                     required: ["uri", "target"],
                     additionalProperties: false,
@@ -127,12 +122,15 @@ export class McpCameraBehavior extends McpBehavior {
             // -----------------------------------------------------------------
             {
                 name: McpCameraBehavior.CameraSetPositionFn,
-                description: "Teleports the camera to an absolute world-space position. " + "For ArcRotateCamera this recalculates alpha, beta and radius automatically.",
+                description:
+                    "Teleports the camera to an absolute world-space position. " +
+                    "Accepts Cartesian {x,y,z} or geographic {lat,lon,alt?}. " +
+                    "For ArcRotateCamera this recalculates alpha, beta and radius automatically.",
                 inputSchema: {
                     type: "object",
                     properties: {
                         uri: { type: "string", description: "Camera URI" },
-                        position: { ...vec3, description: "New camera world-space position (right-handed y-up)." },
+                        position: { ...coord, description: "New camera position. Cartesian {x,y,z} or geographic {lat,lon,alt?}." },
                     },
                     required: ["uri", "position"],
                     additionalProperties: false,
@@ -146,13 +144,14 @@ export class McpCameraBehavior extends McpBehavior {
                 name: McpCameraBehavior.CameraLookAtFn,
                 description:
                     "Moves the camera to a world-space position AND sets its look-at target in a single call. " +
+                    "Accepts Cartesian {x,y,z} or geographic {lat,lon,alt?} for both position and target. " +
                     "The ideal 'place the camera here and frame that subject' director operation.",
                 inputSchema: {
                     type: "object",
                     properties: {
                         uri: { type: "string", description: "Camera URI" },
-                        position: { ...vec3, description: "New camera world-space position (right-handed y-up)." },
-                        target: { ...vec3, description: "World-space look-at point (right-handed y-up)." },
+                        position: { ...coord, description: "New camera position. Cartesian {x,y,z} or geographic {lat,lon,alt?}." },
+                        target: { ...coord, description: "World-space look-at point. Cartesian {x,y,z} or geographic {lat,lon,alt?}." },
                     },
                     required: ["uri", "position", "target"],
                     additionalProperties: false,
@@ -399,8 +398,8 @@ export class McpCameraBehavior extends McpBehavior {
                     type: "object",
                     properties: {
                         uri: { type: "string", description: "Camera URI" },
-                        position: { ...vec3, description: "Destination world-space position (right-handed y-up). Omit to keep the current position." },
-                        target: { ...vec3, description: "Destination world-space look-at point (right-handed y-up). Omit to keep the current look-at target." },
+                        position: { ...coord, description: "Destination position. Cartesian {x,y,z} or geographic {lat,lon,alt?}. Omit to keep the current position." },
+                        target: { ...coord, description: "Destination look-at point. Cartesian {x,y,z} or geographic {lat,lon,alt?}. Omit to keep the current target." },
                         fov: {
                             type: "number",
                             description: "Destination vertical FOV in degrees. Only applies to perspective cameras. Omit to keep the current FOV.",
@@ -468,15 +467,15 @@ export class McpCameraBehavior extends McpBehavior {
                                 type: "object",
                                 properties: {
                                     position: {
-                                        ...vec3,
+                                        ...coord,
                                         description:
-                                            "World-space camera position at this waypoint (right-handed y-up). " +
+                                            "Camera position at this waypoint. Cartesian {x,y,z} or geographic {lat,lon,alt?}. " +
                                             "Omit to carry forward from the previous waypoint.",
                                     },
                                     target: {
-                                        ...vec3,
+                                        ...coord,
                                         description:
-                                            "World-space look-at point at this waypoint (right-handed y-up). " +
+                                            "Look-at point at this waypoint. Cartesian {x,y,z} or geographic {lat,lon,alt?}. " +
                                             "Omit to carry forward from the previous waypoint.",
                                     },
                                 },
