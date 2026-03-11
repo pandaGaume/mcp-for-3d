@@ -27,7 +27,7 @@ import {
     Tools,
     Vector3,
 } from "@babylonjs/core";
-import { JsonRpcMimeType, McpAdapterBase, McpGrammar, McpResourceContent, McpToolResult, McpToolResults } from "@dev/core";
+import { JsonRpcMimeType, McpAdapterBase, McpResourceContent, McpToolResult, McpToolResults } from "@dev/core";
 import {
     ICameraState,
     IFrustum,
@@ -106,7 +106,6 @@ export class McpCameraAdapter extends McpAdapterBase {
         this._initializeCameraIndex();
         this._observers.push(this._scene.onNewCameraAddedObservable.add(this._onCameraAdded.bind(this)));
         this._observers.push(this._scene.onCameraRemovedObservable.add(this._onCameraRemoved.bind(this)));
-        this._rebuildGrammar();
     }
 
     /**
@@ -881,58 +880,11 @@ export class McpCameraAdapter extends McpAdapterBase {
     /** Set the geodetic system for geographic coordinate conversion. */
     public set geodeticSystem(system: GeodeticSystem | undefined) {
         this._geodeticSystem = system;
-        this._rebuildGrammar();
-        this._emitGrammarChanged();
     }
 
     /** Get the current geodetic system, if any. */
     public get geodeticSystem(): GeodeticSystem | undefined {
         return this._geodeticSystem;
-    }
-
-    // -------------------------------------------------------------------------
-    // Grammar — inject coordinate-system descriptions into tool schemas
-    // -------------------------------------------------------------------------
-
-    private get _coordHint(): string {
-        return this._geodeticSystem
-            ? "Accepts Cartesian {x,y,z} (right-handed y-up) or geographic {lat,lon,alt?} (WGS84 degrees)."
-            : "Cartesian {x,y,z} in right-handed y-up coordinate system.";
-    }
-
-    /** Camera tools that accept coordinate inputs (position / target). */
-    private static readonly _COORD_TOOLS = [
-        McpCameraBehavior.CameraSetTargetFn,
-        McpCameraBehavior.CameraSetPositionFn,
-        McpCameraBehavior.CameraLookAtFn,
-        McpCameraBehavior.CameraAnimateToFn,
-        McpCameraBehavior.CameraFollowPathFn,
-    ];
-
-    /**
-     * Rebuilds the adapter grammar based on the current `_coordHint`.
-     * Called in the constructor and whenever `geodeticSystem` changes.
-     */
-    private _rebuildGrammar(): void {
-        const g = new McpGrammar();
-        const hint = this._coordHint;
-
-        // Tool descriptions
-        g.setToolDescription(McpCameraBehavior.CameraSetTargetFn, `Sets the camera look-at point by calling TargetCamera.setTarget(). ${hint}`);
-        g.setToolDescription(McpCameraBehavior.CameraSetPositionFn, `Teleports the camera to an absolute world-space position. ${hint} For ArcRotateCamera this recalculates alpha, beta and radius automatically.`);
-        g.setToolDescription(McpCameraBehavior.CameraLookAtFn, `Moves the camera to a world-space position AND sets its look-at target in a single call. ${hint} The ideal 'place the camera here and frame that subject' director operation.`);
-        g.setToolDescription(McpCameraBehavior.CameraAnimateToFn, `Smoothly animates the camera to a new position, look-at target and/or FOV over the given duration. ${hint} All specified properties are interpolated simultaneously. Properties that are omitted remain unchanged.`);
-        g.setToolDescription(McpCameraBehavior.CameraFollowPathFn, `Moves the camera through an ordered sequence of world-space waypoints over the given duration. ${hint} Position and look-at target are linearly interpolated between adjacent waypoints. If a waypoint omits position or target, that value carries forward from the previous waypoint.`);
-
-        // Property descriptions for coordinate tools
-        for (const tool of McpCameraAdapter._COORD_TOOLS) {
-            g.setPropertyDescription(tool, "position", `Camera position. ${hint}`);
-            g.setPropertyDescription(tool, "waypoints.position", `Camera position. ${hint}`);
-            g.setPropertyDescription(tool, "target", `Look-at point. ${hint}`);
-            g.setPropertyDescription(tool, "waypoints.target", `Look-at point. ${hint}`);
-        }
-
-        this.grammar = g;
     }
 
     /**

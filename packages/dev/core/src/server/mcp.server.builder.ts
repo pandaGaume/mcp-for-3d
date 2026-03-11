@@ -1,4 +1,5 @@
-import type { IMcpBehavior, IMcpInitializer, IMcpServer, IMcpServerBuilder, IMcpServerHandlers, IMcpServerOptions } from "../interfaces";
+import type { IMcpBehavior, IMcpInitializer, IMcpServer, IMcpServerBuilder, IMcpServerHandlers, IMcpServerOptions, McpGrammarResolver } from "../interfaces";
+import { McpGrammar } from "../mcp.grammar";
 import { McpServer } from "./mcp.server";
 
 /**
@@ -10,12 +11,14 @@ import { McpServer } from "./mcp.server";
  *     .withName("babylon-scene")
  *     .withWsUrl("ws://localhost:8080")
  *     .withInitializer(new SceneInitializer())
- *     .withBehavior(new MeshBehavior(), new LightBehavior())
+ *     .withGrammar("concise", McpGrammar.fromJSON(conciseData))
+ *     .withGrammar("verbose", McpGrammar.fromJSON(verboseData))
+ *     .withGrammarResolver(client => client.name.includes("claude") ? "concise" : "verbose")
+ *     .register(new MeshBehavior(), new LightBehavior())
  *     .withOptions({ idleTimeoutMs: 30_000, reconnect: { baseDelayMs: 1_000, maxDelayMs: 30_000 } })
  *     .build();
  *
  * await server.start();
- * server.attach(heroMesh, meshBehavior);
  * ```
  */
 export class McpServerBuilder implements IMcpServerBuilder {
@@ -25,6 +28,8 @@ export class McpServerBuilder implements IMcpServerBuilder {
     private _handlers: IMcpServerHandlers | undefined;
     private _behaviors: IMcpBehavior[] = [];
     private _options: IMcpServerOptions = {};
+    private _grammars = new Map<string, McpGrammar>();
+    private _grammarResolver: McpGrammarResolver | undefined;
 
     /** Sets the human-readable name reported in `initialize` responses. */
     withName(name: string): this {
@@ -80,13 +85,33 @@ export class McpServerBuilder implements IMcpServerBuilder {
     }
 
     /**
+     * Registers a named grammar that can be selected per session based on
+     * the connecting client. Use {@link withGrammarResolver} to map clients
+     * to grammar keys.
+     */
+    withGrammar(key: string, grammar: McpGrammar): this {
+        this._grammars.set(key, grammar);
+        return this;
+    }
+
+    /**
+     * Sets the function that maps a connecting client to a grammar key.
+     * Called during the `initialize` handshake with the client's identity.
+     * The returned key is looked up in the grammars registered via {@link withGrammar}.
+     */
+    withGrammarResolver(resolver: McpGrammarResolver): this {
+        this._grammarResolver = resolver;
+        return this;
+    }
+
+    /**
      * Constructs and returns a configured {@link IMcpServer}.
      * @throws {Error} if `withWsUrl()` was not called.
      */
     build(): IMcpServer {
         if (!this._wsUrl) throw new Error("McpServerBuilder: withWsUrl() is required before build()");
 
-        const server = new McpServer(this._name, this._wsUrl, this._options, this._initializer, this._handlers);
+        const server = new McpServer(this._name, this._wsUrl, this._options, this._initializer, this._handlers, this._grammars, this._grammarResolver);
 
         for (const behavior of this._behaviors) {
             server.register(behavior);

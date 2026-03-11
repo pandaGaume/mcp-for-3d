@@ -1,6 +1,5 @@
 import { IEventSource } from "./eventSource";
 import { McpResource, McpResourceContent, McpResourceTemplate, McpTool } from "./mcp.core.interfaces";
-import { McpGrammar } from "../mcp.grammar";
 
 // ── Tool Support ─────────────────────────────────────────────────────────────
 
@@ -122,22 +121,6 @@ export interface IMcpBehaviorAdapter extends IMcpRuntimeOperations {
      *          {@link ToolSupport.Full} (backwards-compatible default).
      */
     getToolSupport?(toolName: string, resourceType?: string): ToolSupport | undefined;
-
-    /**
-     * Adapter-specific grammar overrides.  The behaviour merges this grammar
-     * on top of its own defaults when building tool schemas.
-     *
-     * Adapters that need dynamic grammar (e.g. Babylon camera with optional
-     * geodetic system) should rebuild this grammar when config changes and
-     * signal the behaviour via {@link onGrammarChanged}.
-     */
-    grammar?: McpGrammar;
-
-    /**
-     * Fires when the adapter's grammar has been rebuilt.
-     * The behaviour listens to this in order to invalidate its tools cache.
-     */
-    onGrammarChanged?: IEventSource<void>;
 }
 
 /**

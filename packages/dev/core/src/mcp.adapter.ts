@@ -1,12 +1,9 @@
 import { createEventEmitter, IEventEmitter, IEventSource, IMcpBehaviorAdapter, McpResourceContent, McpToolResult, ToolSupport } from "./interfaces";
-import { McpGrammar } from "./mcp.grammar";
 
 export abstract class McpAdapterBase implements IMcpBehaviorAdapter {
     private _domain: string;
     private _onResourceContentChanged?: IEventEmitter<string>;
     private _onResourcesChanged?: IEventEmitter<void>;
-    private _onGrammarChanged?: IEventEmitter<void>;
-    private _grammar?: McpGrammar;
 
     constructor(domain: string) {
         this._domain = domain;
@@ -14,27 +11,6 @@ export abstract class McpAdapterBase implements IMcpBehaviorAdapter {
 
     public get domain(): string {
         return this._domain;
-    }
-
-    // ── Grammar ──────────────────────────────────────────────────────────────
-
-    public get grammar(): McpGrammar | undefined {
-        return this._grammar;
-    }
-
-    public set grammar(value: McpGrammar | undefined) {
-        this._grammar = value;
-    }
-
-    public get onGrammarChanged(): IEventSource<void> {
-        if (!this._onGrammarChanged) {
-            this._onGrammarChanged = createEventEmitter<void>();
-        }
-        return this._onGrammarChanged;
-    }
-
-    protected _emitGrammarChanged(): void {
-        this._onGrammarChanged?.emit();
     }
 
     // ── Resource events ──────────────────────────────────────────────────────
@@ -73,8 +49,6 @@ export abstract class McpAdapterBase implements IMcpBehaviorAdapter {
         this._onResourceContentChanged = undefined;
         this._onResourcesChanged?.clear();
         this._onResourcesChanged = undefined;
-        this._onGrammarChanged?.clear();
-        this._onGrammarChanged = undefined;
     }
 
     protected _forwardResourceChanged() {

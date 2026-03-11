@@ -2,10 +2,12 @@
  * Serialisable grammar layer — holds tool-level and property-level descriptions
  * that can be edited at runtime and round-tripped to/from JSON.
  *
- * The MCP behaviour uses up to three grammar layers (highest priority first):
+ * The MCP behaviour uses up to two grammar layers (highest priority first):
  * 1. **Runtime grammar**  — loaded from JSON / set via API
  * 2. **Adapter grammar**  — engine-specific (Babylon, Cesium …)
- * 3. **Default grammar**  — hardcoded baseline in the behaviour
+ *
+ * If neither layer provides a value, the behaviour falls back to the inline
+ * default string supplied at each call site.
  *
  * Each layer is an `McpGrammar` instance.  At resolution time the behaviour
  * walks the layers top-down and returns the first non-`undefined` value.

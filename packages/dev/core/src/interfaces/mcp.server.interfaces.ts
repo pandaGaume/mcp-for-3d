@@ -1,5 +1,21 @@
 import type { IMcpServerHandlers, McpClientCapabilities, McpClientInfo, McpServerIdentity } from "./mcp.core.interfaces";
 import type { IMcpBehavior } from "./mcp.behavior.interfaces";
+import type { McpGrammar } from "../mcp.grammar";
+
+/**
+ * Maps {@link McpClientInfo} to a grammar key from the server's grammar map.
+ * Return `undefined` to skip grammar patching for the connecting client.
+ *
+ * @example
+ * ```typescript
+ * const resolver: McpGrammarResolver = (client) => {
+ *     if (client.name.includes("claude")) return "concise";
+ *     if (client.name.includes("gpt"))    return "verbose";
+ *     return undefined; // fallback descriptions only
+ * };
+ * ```
+ */
+export type McpGrammarResolver = (clientInfo: McpClientInfo) => string | undefined;
 
 /**
  * Handles the domain-level MCP initialization handshake.
@@ -99,6 +115,20 @@ export interface IMcpServerBuilder {
      */
     withHandlers(handlers: IMcpServerHandlers): IMcpServerBuilder;
     withOptions(o: IMcpServerOptions): IMcpServerBuilder;
+
+    /**
+     * Registers a named grammar that can be selected per session.
+     * Use {@link withGrammarResolver} to map connecting clients to grammar keys.
+     */
+    withGrammar(key: string, grammar: McpGrammar): IMcpServerBuilder;
+
+    /**
+     * Sets the function that maps a connecting client to a grammar key.
+     * Called during the `initialize` handshake with the client's identity.
+     * The returned key is looked up in the grammars registered via {@link withGrammar}.
+     */
+    withGrammarResolver(resolver: McpGrammarResolver): IMcpServerBuilder;
+
     build(): IMcpServer;
 }
 

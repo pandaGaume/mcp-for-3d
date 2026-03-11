@@ -1,4 +1,4 @@
-import type { IMcpBehavior, IMcpInitializer, IMcpRuntimeOperations, IMcpServer, IMcpServerHandlers, IMcpServerOptions } from "../interfaces";
+import type { IMcpBehavior, IMcpInitializer, IMcpRuntimeOperations, IMcpServer, IMcpServerHandlers, IMcpServerOptions, McpGrammarResolver } from "../interfaces";
 import type {
     JsonRpcNotification,
     JsonRpcRequest,
@@ -10,6 +10,7 @@ import type {
     McpServerCapabilities,
     McpTool,
 } from "../interfaces";
+import { McpGrammar } from "../mcp.grammar";
 import { Mcp } from "./jsonrpc.helpers";
 
 /**
@@ -60,13 +61,38 @@ export class McpServer implements IMcpServer, IMcpServerHandlers {
     private readonly _behaviors = new Map<string, IMcpBehavior>();
     private readonly _resourceIndex = new Map<string, IMcpRuntimeOperations>();
 
-    constructor(name: string, wsUrl: string, options: IMcpServerOptions, initializer?: IMcpInitializer, handlers?: IMcpServerHandlers) {
+    // ── Grammar ──────────────────────────────────────────────────────────────
+
+    /** Named grammars registered via the builder, keyed by a user-defined string. */
+    private readonly _grammars: Map<string, McpGrammar>;
+
+    /** Resolves a connecting client's identity to a grammar key. */
+    private readonly _grammarResolver: McpGrammarResolver | undefined;
+
+    /**
+     * The grammar selected for the current session during the `initialize` handshake.
+     * Applied on top of behaviour fallback descriptions when responding to `tools/list`.
+     * Reset to `undefined` on disconnect so the next session starts clean.
+     */
+    private _sessionGrammar: McpGrammar | undefined;
+
+    constructor(
+        name: string,
+        wsUrl: string,
+        options: IMcpServerOptions,
+        initializer?: IMcpInitializer,
+        handlers?: IMcpServerHandlers,
+        grammars?: Map<string, McpGrammar>,
+        grammarResolver?: McpGrammarResolver,
+    ) {
         this._name = name;
         this._wsUrl = wsUrl;
         this._options = options;
         this._initializer = initializer;
         // If no custom handlers provided, the server routes messages itself.
         this._handlers = handlers ?? this;
+        this._grammars = grammars ?? new Map();
+        this._grammarResolver = grammarResolver;
     }
 
     // -------------------------------------------------------------------------
@@ -151,13 +177,22 @@ export class McpServer implements IMcpServer, IMcpServerHandlers {
      * Handles the `initialize` handshake.
      * Delegates identity/version to {@link IMcpInitializer} if one was provided,
      * then merges with capabilities derived from registered behaviors.
+     *
+     * Also resolves the session grammar from the grammar map using the
+     * configured {@link McpGrammarResolver}, if any.
      */
     initialize(req: JsonRpcRequest): JsonRpcResponse {
         const params = req.params as { clientInfo?: McpClientInfo; capabilities?: McpClientCapabilities } | undefined;
 
+        const clientInfo = params?.clientInfo ?? { name: "unknown", version: "0.0.0" };
+
         const identity = this._initializer
-            ? this._initializer.initialize(params?.clientInfo ?? { name: "unknown", version: "0.0.0" }, params?.capabilities ?? {})
+            ? this._initializer.initialize(clientInfo, params?.capabilities ?? {})
             : { protocolVersion: "2024-11-05", serverInfo: { name: this._name, version: "0.0.0" } };
+
+        // Resolve the session grammar from the grammar map.
+        const grammarKey = this._grammarResolver?.(clientInfo);
+        this._sessionGrammar = grammarKey ? this._grammars.get(grammarKey) : undefined;
 
         const result: McpInitializeResult = { ...identity, capabilities: this._deriveCapabilities() };
 
@@ -214,6 +249,9 @@ export class McpServer implements IMcpServer, IMcpServerHandlers {
      * Deduplicates tools by name: all instances of the same behavior expose
      * identical schemas, so each tool is listed only once.
      * The target instance is identified at call time via the `uri` argument.
+     *
+     * If a session grammar was resolved during `initialize`, tool and property
+     * descriptions are patched before the response is sent.
      */
     toolsList(req: JsonRpcRequest): JsonRpcResponse {
         const tools: McpTool[] = [];
@@ -224,7 +262,9 @@ export class McpServer implements IMcpServer, IMcpServerHandlers {
             }
         }
 
-        return Mcp.toolsListResult(req.id, tools);
+        const patched = this._sessionGrammar ? this._applyGrammar(tools, this._sessionGrammar) : tools;
+
+        return Mcp.toolsListResult(req.id, patched);
     }
 
     /**
@@ -249,6 +289,80 @@ export class McpServer implements IMcpServer, IMcpServerHandlers {
         const r = this._resourceIndex.get(uri) ?? this._matchTemplate(uri);
         if (!r) return Mcp.instanceNotFound(req.id, uri);
         return this._callTool(req, r, uri, name, args);
+    }
+
+    // -------------------------------------------------------------------------
+    // Grammar patching
+    // -------------------------------------------------------------------------
+
+    /**
+     * Applies a grammar layer on top of tool schemas returned by behaviours.
+     * Returns new tool objects — the originals (which may be cached) are never mutated.
+     *
+     * For each tool the grammar may override:
+     * - The tool-level `description`
+     * - Individual property `description` fields inside `inputSchema.properties`
+     *   (supports dot-notation for nested objects, e.g. `"patch.position"`)
+     */
+    private _applyGrammar(tools: McpTool[], grammar: McpGrammar): McpTool[] {
+        return tools.map((tool) => {
+            const toolDesc = grammar.getToolDescription(tool.name);
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const schema = tool.inputSchema as any;
+            const patchedSchema = schema?.properties ? this._patchProperties(tool.name, schema, grammar) : schema;
+
+            if (!toolDesc && patchedSchema === schema) {
+                return tool; // nothing to patch
+            }
+
+            return {
+                ...tool,
+                description: toolDesc ?? tool.description,
+                inputSchema: patchedSchema,
+            };
+        });
+    }
+
+    /**
+     * Recursively patches property descriptions in a JSON schema object.
+     * Returns the original schema reference when no patches are needed,
+     * or a shallow copy with patched `description` fields.
+     */
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    private _patchProperties(toolName: string, schema: any, grammar: McpGrammar, prefix = ""): any {
+        const props = schema.properties;
+        if (!props) return schema;
+
+        let patched = false;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const newProps: Record<string, any> = {};
+
+        for (const [key, value] of Object.entries(props)) {
+            const qualifiedKey = prefix ? `${prefix}.${key}` : key;
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            let prop = value as any;
+
+            // Check for a grammar override on this property
+            const propDesc = grammar.getPropertyDescription(toolName, qualifiedKey);
+            if (propDesc !== undefined) {
+                prop = { ...prop, description: propDesc };
+                patched = true;
+            }
+
+            // Recurse into nested object properties
+            if (prop.properties) {
+                const nested = this._patchProperties(toolName, prop, grammar, qualifiedKey);
+                if (nested !== prop) {
+                    prop = nested;
+                    patched = true;
+                }
+            }
+
+            newProps[key] = prop;
+        }
+
+        if (!patched) return schema;
+        return { ...schema, properties: newProps };
     }
 
     // -------------------------------------------------------------------------
@@ -294,6 +408,7 @@ export class McpServer implements IMcpServer, IMcpServerHandlers {
         this._isRunning = false;
         this._ws = null;
         this._sessionReady = false; // handshake must be repeated on reconnection
+        this._sessionGrammar = undefined; // grammar must be re-resolved on reconnection
         this._clearIdleTimer();
 
         if (!this._stopped) {

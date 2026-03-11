@@ -66,7 +66,7 @@ import {
     Transforms,
     Viewer,
 } from "cesium";
-import { JsonRpcMimeType, McpAdapterBase, McpGrammar, McpResourceContent, McpToolResult, McpToolResults, ToolSupport } from "@dev/core";
+import { JsonRpcMimeType, McpAdapterBase, McpResourceContent, McpToolResult, McpToolResults, ToolSupport } from "@dev/core";
 import { ICameraState, IFrustum, IScenePickHit, IScenePickResult, ISceneVisibleObjectsState, IVisibleObjectState, McpCameraBehavior } from "@dev/behaviors";
 import { resolveToCartesian3 } from "@dev/geodesy";
 import { McpCesiumDomain, McpCameraResourceUriPrefix } from "../mcp.commons";
@@ -211,8 +211,6 @@ export class McpCameraAdapter extends McpAdapterBase {
         // Compute an initial look-at target from the camera's current state.
         this._target = this._computeDefaultTarget();
 
-        // Static grammar — ECEF coordinate descriptions.
-        this.grammar = this._buildAdapterGrammar();
     }
 
     /**
@@ -228,50 +226,6 @@ export class McpCameraAdapter extends McpAdapterBase {
             return ToolSupport.Partial;
         }
         return undefined; // all others: Full (default)
-    }
-
-    // ── Grammar ────────────────────────────────────────────────────────────
-
-    /** Camera tools that accept coordinate inputs (position / target). */
-    private static readonly _COORD_TOOLS = [
-        McpCameraBehavior.CameraSetTargetFn,
-        McpCameraBehavior.CameraSetPositionFn,
-        McpCameraBehavior.CameraLookAtFn,
-        McpCameraBehavior.CameraAnimateToFn,
-        McpCameraBehavior.CameraFollowPathFn,
-    ];
-
-    private static readonly _COORD_HINT = "Accepts ECEF {x,y,z} in metres or geographic {lat,lon,alt?} in WGS84 degrees.";
-
-    /** Builds the static adapter grammar with ECEF coordinate descriptions. */
-    private _buildAdapterGrammar(): McpGrammar {
-        const g = new McpGrammar();
-        const hint = McpCameraAdapter._COORD_HINT;
-
-        // Tool descriptions
-        g.setToolDescription(McpCameraBehavior.CameraSetTargetFn, `Sets the camera look-at point. ${hint}`);
-        g.setToolDescription(McpCameraBehavior.CameraSetPositionFn, `Teleports the camera to an absolute position. ${hint}`);
-        g.setToolDescription(McpCameraBehavior.CameraLookAtFn, `Moves the camera to a position AND sets its look-at target in a single call. ${hint}`);
-        g.setToolDescription(McpCameraBehavior.CameraAnimateToFn, `Smoothly animates the camera to a new position, look-at target and/or FOV over the given duration. ${hint} All specified properties are interpolated simultaneously. Properties that are omitted remain unchanged.`);
-        g.setToolDescription(McpCameraBehavior.CameraFollowPathFn, `Moves the camera through an ordered sequence of waypoints over the given duration. ${hint} Position and look-at target are linearly interpolated between adjacent waypoints.`);
-        g.setToolDescription(McpCameraBehavior.CameraDollyFn, "Physically moves the camera toward (+) or away from (-) its look-at target along the view axis. Distance is in metres.");
-        g.setToolDescription(McpCameraBehavior.CameraPanFn, "Slides the camera and its look-at target together perpendicular to the view axis. Offsets are in metres.");
-
-        // Property descriptions for coordinate tools
-        for (const tool of McpCameraAdapter._COORD_TOOLS) {
-            g.setPropertyDescription(tool, "position", "Camera position. ECEF {x,y,z} in metres or geographic {lat,lon,alt?} WGS84 degrees.");
-            g.setPropertyDescription(tool, "waypoints.position", "Camera position. ECEF {x,y,z} in metres or geographic {lat,lon,alt?} WGS84 degrees.");
-            g.setPropertyDescription(tool, "target", "Look-at point. ECEF {x,y,z} in metres or geographic {lat,lon,alt?} WGS84 degrees.");
-            g.setPropertyDescription(tool, "waypoints.target", "Look-at point. ECEF {x,y,z} in metres or geographic {lat,lon,alt?} WGS84 degrees.");
-        }
-
-        // Non-coordinate property descriptions
-        g.setPropertyDescription(McpCameraBehavior.CameraDollyFn, "distance", "Distance in metres along the view axis. Positive = closer to target, negative = further away.");
-        g.setPropertyDescription(McpCameraBehavior.CameraPanFn, "deltaX", "Metres to slide horizontally along the camera right vector. Positive = slide right.");
-        g.setPropertyDescription(McpCameraBehavior.CameraPanFn, "deltaY", "Metres to slide vertically along the camera up vector. Positive = slide up.");
-        g.setPropertyDescription(McpCameraBehavior.CameraShakeFn, "intensity", "Peak shake amplitude in metres. Defaults to 0.5.");
-
-        return g;
     }
 
     /** Stops any running animation and cleans up event emitters. */

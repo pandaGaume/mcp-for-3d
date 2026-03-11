@@ -21,7 +21,7 @@ import {
     Tags,
     Vector3,
 } from "@babylonjs/core";
-import { JsonRpcMimeType, McpAdapterBase, McpGrammar, McpResourceContent, McpToolResult, McpToolResults } from "@dev/core";
+import { JsonRpcMimeType, McpAdapterBase, McpResourceContent, McpToolResult, McpToolResults } from "@dev/core";
 import { IMeshMaterialState, IMeshState, IMeshTransformState, McpMeshBehavior, MeshMaterialType } from "@dev/behaviors";
 import { McpBabylonDomain, McpMeshResourceUriPrefix } from "../mcp.commons";
 
@@ -73,18 +73,6 @@ export class McpMeshAdapter extends McpAdapterBase {
         this._initializeMeshIndex();
         this._observers.push(this._scene.onNewMeshAddedObservable.add(this._onMeshAdded.bind(this)));
         this._observers.push(this._scene.onMeshRemovedObservable.add(this._onMeshRemoved.bind(this)));
-
-        // Static grammar — coordinate system hints for mesh properties.
-        const g = new McpGrammar();
-        const posDesc = "World-space position {x, y, z} in right-handed y-up coordinate system.";
-        const rotDesc = "Euler angles in degrees {x, y, z} (right-handed y-up). x=pitch, y=yaw, z=roll.";
-        for (const tool of [McpMeshBehavior.MeshSetPositionFn, McpMeshBehavior.MeshAnimateToFn]) {
-            g.setPropertyDescription(tool, "position", posDesc);
-        }
-        for (const tool of [McpMeshBehavior.MeshSetRotationFn, McpMeshBehavior.MeshAnimateToFn]) {
-            g.setPropertyDescription(tool, "rotation", rotDesc);
-        }
-        this.grammar = g;
     }
 
     /**

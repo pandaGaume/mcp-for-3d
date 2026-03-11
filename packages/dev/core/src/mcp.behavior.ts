@@ -1,7 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { IMcpBehaviorAdapter, McpResource, McpResourceContent, McpResourceTemplate, McpTool, McpToolResult, ToolSupport } from "./interfaces";
 import { McpBehaviorBase, McpBehaviorOptions } from "./mcp.behaviorBase";
-import { McpGrammar } from "./mcp.grammar";
 
 export abstract class McpBehavior extends McpBehaviorBase {
     private _resourceCache?: McpResource[];
@@ -11,84 +10,33 @@ export abstract class McpBehavior extends McpBehaviorBase {
     private _toolsCache?: McpTool[];
     private _adapter: IMcpBehaviorAdapter;
 
-    private _defaultGrammarCache?: McpGrammar;
-    private _runtimeGrammar?: McpGrammar;
-
     public constructor(adapter: IMcpBehaviorAdapter, options: McpBehaviorOptions) {
         super(options);
         this._adapter = adapter;
-
-        // Subscribe to adapter grammar changes to invalidate tools cache.
-        adapter.onGrammarChanged?.subscribe(() => {
-            this._toolsCache = undefined;
-        });
     }
 
     protected get adapter(): IMcpBehaviorAdapter {
         return this._adapter;
     }
 
-    // ── Grammar ──────────────────────────────────────────────────────────────
+    // ── Grammar helpers ──────────────────────────────────────────────────────
 
     /**
-     * Override in subclasses to provide the baseline grammar containing all
-     * default tool and property descriptions for this behaviour.
-     *
-     * Called once (lazily) and cached.  The result is the lowest-priority layer
-     * in the three-layer grammar resolution.
+     * Returns the fallback description for a tool.
+     * Grammar overrides are applied at the server level per session — behaviours
+     * only provide the baseline fallback strings.
      */
-    protected abstract _buildDefaultGrammar(): McpGrammar;
-
-    private get _defaultGrammar(): McpGrammar {
-        if (!this._defaultGrammarCache) {
-            this._defaultGrammarCache = this._buildDefaultGrammar();
-        }
-        return this._defaultGrammarCache;
+    protected _resolveToolDescription(_toolName: string, fallback: string): string {
+        return fallback;
     }
 
     /**
-     * Sets (or clears) the runtime grammar layer — highest priority.
-     * Invalidates the tools cache so the next `getTools()` call reflects the
-     * new descriptions.
+     * Returns the fallback description for a tool property.
+     * Grammar overrides are applied at the server level per session — behaviours
+     * only provide the baseline fallback strings.
      */
-    public setRuntimeGrammar(grammar: McpGrammar | undefined): void {
-        this._runtimeGrammar = grammar;
-        this._toolsCache = undefined;
-    }
-
-    /** Returns the runtime grammar (if set). */
-    public getRuntimeGrammar(): McpGrammar | undefined {
-        return this._runtimeGrammar;
-    }
-
-    /**
-     * Returns a merged grammar snapshot: default ← adapter ← runtime.
-     * Useful for serialisation / inspection.
-     */
-    public getEffectiveGrammar(): McpGrammar {
-        return McpGrammar.merge(this._defaultGrammar, this._adapter.grammar, this._runtimeGrammar);
-    }
-
-    /**
-     * Resolves a tool description through the three grammar layers.
-     * Falls back to `fallback` if no layer provides a value.
-     */
-    protected _resolveToolDescription(toolName: string, fallback: string): string {
-        return this._runtimeGrammar?.getToolDescription(toolName)
-            ?? this._adapter.grammar?.getToolDescription(toolName)
-            ?? this._defaultGrammar.getToolDescription(toolName)
-            ?? fallback;
-    }
-
-    /**
-     * Resolves a property description through the three grammar layers.
-     * Falls back to `fallback` if no layer provides a value.
-     */
-    protected _resolvePropertyDescription(toolName: string, propertyName: string, fallback: string): string {
-        return this._runtimeGrammar?.getPropertyDescription(toolName, propertyName)
-            ?? this._adapter.grammar?.getPropertyDescription(toolName, propertyName)
-            ?? this._defaultGrammar.getPropertyDescription(toolName, propertyName)
-            ?? fallback;
+    protected _resolvePropertyDescription(_toolName: string, _propertyName: string, fallback: string): string {
+        return fallback;
     }
 
     // ── Resources ────────────────────────────────────────────────────────────

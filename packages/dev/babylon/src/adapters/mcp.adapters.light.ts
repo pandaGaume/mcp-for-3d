@@ -1,5 +1,5 @@
 import { Color3, DirectionalLight, Engine, EventState, HemisphericLight, Light, Nullable, Observer, PointLight, Scene, SpotLight, Vector3 } from "@babylonjs/core";
-import { JsonRpcMimeType, McpAdapterBase, McpGrammar, McpResourceContent, McpToolResult, McpToolResults } from "@dev/core";
+import { JsonRpcMimeType, McpAdapterBase, McpResourceContent, McpToolResult, McpToolResults } from "@dev/core";
 import { IColor3, ILightPatch, ILightState, McpLightBehavior } from "@dev/behaviors";
 import { McpBabylonDomain, McpLightResourceUriPrefix } from "../mcp.commons";
 
@@ -70,22 +70,6 @@ export class McpLightAdapter extends McpAdapterBase {
         this._initializeLightIndex();
         this._observers.push(this._scene.onNewLightAddedObservable.add(this._onLightAdded.bind(this)));
         this._observers.push(this._scene.onLightRemovedObservable.add(this._onLightRemoved.bind(this)));
-
-        // Static grammar — coordinate system hints for light properties.
-        const g = new McpGrammar();
-        const posDesc = "World-space position {x, y, z} in right-handed y-up coordinate system.";
-        const dirDesc = "Direction vector {x, y, z} in right-handed y-up coordinate system. Will be normalised.";
-        const tgtDesc = "World-space point {x, y, z} to aim the light at (right-handed y-up).";
-        for (const tool of [McpLightBehavior.LightSetPositionFn, McpLightBehavior.LightCreateFn, McpLightBehavior.LightUpdateFn]) {
-            g.setPropertyDescription(tool, "position", posDesc);
-            g.setPropertyDescription(tool, "patch.position", posDesc);
-        }
-        for (const tool of [McpLightBehavior.LightSetDirectionFn, McpLightBehavior.LightCreateFn, McpLightBehavior.LightUpdateFn]) {
-            g.setPropertyDescription(tool, "direction", dirDesc);
-            g.setPropertyDescription(tool, "patch.direction", dirDesc);
-        }
-        g.setPropertyDescription(McpLightBehavior.LightSetTargetFn, "target", tgtDesc);
-        this.grammar = g;
     }
 
     /**
