@@ -1,4 +1,4 @@
-import { IMcpBehaviorAdapter, JsonRpcMimeType, McpBehavior, McpBehaviorOptions, McpResource, McpResourceTemplate, McpTool } from "@dev/core";
+import { IMcpBehaviorAdapter, JsonRpcMimeType, McpBehavior, McpBehaviorOptions, McpGrammar, McpResource, McpResourceTemplate, McpTool } from "@dev/core";
 import { McpLightNamespace } from "../mcp.commons";
 
 export class McpLightBehavior extends McpBehavior {
@@ -70,6 +70,123 @@ export class McpLightBehavior extends McpBehavior {
         });
     }
 
+    protected override _buildDefaultGrammar(): McpGrammar {
+        const g = new McpGrammar();
+
+        // ── light_create ────────────────────────────────────────────────────
+        g.setToolDescription(
+            McpLightBehavior.LightCreateFn,
+            "Creates a new light in the scene. Required fields vary by type:\n" +
+                "- point: name, position\n" +
+                "- directional: name, direction\n" +
+                "- spot: name, position, direction, angle\n" +
+                "- hemispheric: name, direction\n" +
+                "Returns the URI of the newly created light."
+        );
+        g.setPropertyDescription(McpLightBehavior.LightCreateFn, "type", "Type of light to create.");
+        g.setPropertyDescription(McpLightBehavior.LightCreateFn, "name", "Name for the new light. Must be unique in the scene.");
+        g.setPropertyDescription(McpLightBehavior.LightCreateFn, "position", "World-space position (right-handed y-up). Required for point and spot.");
+        g.setPropertyDescription(McpLightBehavior.LightCreateFn, "direction", "Direction vector (right-handed y-up). Required for directional, spot, and hemispheric.");
+        g.setPropertyDescription(McpLightBehavior.LightCreateFn, "angle", "Cone half-angle in degrees. Required for spot. Must be in (0, 90).");
+        g.setPropertyDescription(McpLightBehavior.LightCreateFn, "exponent", "Falloff exponent. Spot only, optional (default 2).");
+        g.setPropertyDescription(McpLightBehavior.LightCreateFn, "intensity", "Initial intensity (default 1).");
+        g.setPropertyDescription(McpLightBehavior.LightCreateFn, "diffuseColor", "Initial diffuse color (default white).");
+        g.setPropertyDescription(McpLightBehavior.LightCreateFn, "specularColor", "Initial specular color (default white).");
+        g.setPropertyDescription(McpLightBehavior.LightCreateFn, "groundColor", "Initial ground color. Hemispheric only, optional.");
+        g.setPropertyDescription(McpLightBehavior.LightCreateFn, "range", "Effective range in world units. Point and spot only, optional.");
+
+        // ── light_remove ────────────────────────────────────────────────────
+        g.setToolDescription(McpLightBehavior.LightRemoveFn, "Removes a light from the scene and disposes all its resources.");
+
+        // ── light_set_enabled ───────────────────────────────────────────────
+        g.setToolDescription(McpLightBehavior.LightSetEnabledFn, "Enables or disables a light without removing it from the scene.");
+        g.setPropertyDescription(McpLightBehavior.LightSetEnabledFn, "enabled", "True to enable the light, false to disable it.");
+
+        // ── light_set_intensity ─────────────────────────────────────────────
+        g.setToolDescription(McpLightBehavior.LightSetIntensityFn, "Sets the intensity (brightness multiplier) of a light. Default is 1. Values above 1 overbrighten.");
+        g.setPropertyDescription(McpLightBehavior.LightSetIntensityFn, "intensity", "New intensity. Must be >= 0.");
+
+        // ── light_set_diffuse_color ─────────────────────────────────────────
+        g.setToolDescription(McpLightBehavior.LightSetDiffuseColorFn, "Sets the diffuse (main) color emitted by a light. Channels are in [0, 1].");
+
+        // ── light_set_specular_color ────────────────────────────────────────
+        g.setToolDescription(McpLightBehavior.LightSetSpecularColorFn, "Sets the specular (highlight) color emitted by a light. Channels are in [0, 1].");
+
+        // ── light_set_position ──────────────────────────────────────────────
+        g.setToolDescription(
+            McpLightBehavior.LightSetPositionFn,
+            "Sets the world-space position of a light. " +
+                "For point and spot lights this is the emission origin. " +
+                "For directional lights it only moves the shadow-frustum origin (no effect on light direction). " +
+                "Not applicable to hemispheric lights."
+        );
+        g.setPropertyDescription(McpLightBehavior.LightSetPositionFn, "position", "New world-space position (right-handed y-up).");
+
+        // ── light_set_direction ─────────────────────────────────────────────
+        g.setToolDescription(
+            McpLightBehavior.LightSetDirectionFn,
+            "Sets the direction vector of a directional, spot, or hemispheric light. " +
+                "The vector is normalised internally. " +
+                "For hemispheric lights, direction points toward the sky (bright hemisphere). " +
+                "Not applicable to point lights."
+        );
+        g.setPropertyDescription(McpLightBehavior.LightSetDirectionFn, "direction", "New direction vector (right-handed y-up). Will be normalised.");
+
+        // ── light_set_target ────────────────────────────────────────────────
+        g.setToolDescription(
+            McpLightBehavior.LightSetTargetFn,
+            "Aims a spot or directional light at a world-space target point. " +
+                "Computes direction = normalize(target − position). " +
+                "Only applicable to spot and directional lights (requires a position)."
+        );
+        g.setPropertyDescription(McpLightBehavior.LightSetTargetFn, "target", "World-space point to aim the light at (right-handed y-up).");
+
+        // ── light_set_range ─────────────────────────────────────────────────
+        g.setToolDescription(
+            McpLightBehavior.LightSetRangeFn,
+            "Sets the effective range of a point or spot light. Beyond this distance the light contributes nothing. Not applicable to directional or hemispheric lights."
+        );
+        g.setPropertyDescription(McpLightBehavior.LightSetRangeFn, "range", "Range in world units. Must be > 0.");
+
+        // ── light_spot_set_angle ────────────────────────────────────────────
+        g.setToolDescription(McpLightBehavior.LightSpotSetAngleFn, "Sets the cone half-angle of a spot light in degrees. Smaller angle = tighter, more focused beam. Only applicable to spot lights.");
+        g.setPropertyDescription(McpLightBehavior.LightSpotSetAngleFn, "angle", "Cone half-angle in degrees. Must be in (0, 90).");
+
+        // ── light_spot_set_exponent ─────────────────────────────────────────
+        g.setToolDescription(McpLightBehavior.LightSpotSetExponentFn, "Sets the falloff exponent of a spot light. Higher values concentrate the light toward the cone axis. Only applicable to spot lights.");
+        g.setPropertyDescription(McpLightBehavior.LightSpotSetExponentFn, "exponent", "Falloff exponent. Must be >= 0.");
+
+        // ── light_hemi_set_ground_color ─────────────────────────────────────
+        g.setToolDescription(McpLightBehavior.LightHemiSetGroundColorFn, "Sets the ground (bottom hemisphere) color of a hemispheric light. Channels are in [0, 1]. Only applicable to hemispheric lights.");
+
+        // ── scene_get_ambient ───────────────────────────────────────────────
+        g.setToolDescription(McpLightBehavior.SceneGetAmbientFn, "Returns the current scene-level ambient light: enabled state and color (r, g, b in [0, 1]).");
+
+        // ── scene_set_ambient_color ─────────────────────────────────────────
+        g.setToolDescription(McpLightBehavior.SceneSetAmbientColorFn, "Sets the scene ambient color (scene.ambientColor). Affects all materials that use ambient. Channels are in [0, 1].");
+
+        // ── scene_set_ambient_enabled ───────────────────────────────────────
+        g.setToolDescription(McpLightBehavior.SceneSetAmbientEnabledFn, "Enables or disables scene ambient lighting. When disabled, scene.ambientColor is set to black; the previous color is restored when re-enabled.");
+        g.setPropertyDescription(McpLightBehavior.SceneSetAmbientEnabledFn, "enabled", "True to enable ambient, false to disable.");
+
+        // ── light_update ────────────────────────────────────────────────────
+        g.setToolDescription(
+            McpLightBehavior.LightUpdateFn,
+            "Applies a partial patch to an existing light in one call. " +
+                "Fields that are not applicable to the light type are silently ignored (reported in the response). " +
+                "Useful for batching multiple property changes without issuing separate tool calls."
+        );
+        g.setPropertyDescription(McpLightBehavior.LightUpdateFn, "patch", "Partial state to apply. All fields optional.");
+        g.setPropertyDescription(McpLightBehavior.LightUpdateFn, "patch.position", "point, spot, directional (shadow frustum).");
+        g.setPropertyDescription(McpLightBehavior.LightUpdateFn, "patch.direction", "directional, spot, hemispheric.");
+        g.setPropertyDescription(McpLightBehavior.LightUpdateFn, "patch.range", "point, spot only.");
+        g.setPropertyDescription(McpLightBehavior.LightUpdateFn, "patch.angle", "Spot only. Cone half-angle in degrees.");
+        g.setPropertyDescription(McpLightBehavior.LightUpdateFn, "patch.exponent", "Spot only. Falloff exponent.");
+        g.setPropertyDescription(McpLightBehavior.LightUpdateFn, "patch.groundColor", "Hemispheric only. Ground color.");
+
+        return g;
+    }
+
     protected override _buildTools(): McpTool[] {
         const vec3 = {
             type: "object",
@@ -102,9 +219,8 @@ export class McpLightBehavior extends McpBehavior {
             // -----------------------------------------------------------------
             {
                 name: McpLightBehavior.LightCreateFn,
-                description: this._buildToolDescription(
+                description: this._resolveToolDescription(
                     McpLightBehavior.LightCreateFn,
-                    undefined,
                     "Creates a new light in the scene. Required fields vary by type:\n" +
                         "- point: name, position\n" +
                         "- directional: name, direction\n" +
@@ -115,22 +231,22 @@ export class McpLightBehavior extends McpBehavior {
                 inputSchema: {
                     type: "object",
                     properties: {
-                        uri: { type: "string", description: this._buildToolPropertyDescription(McpLightBehavior.LightCreateFn, "uri", undefined, namespaceUriDesc) },
+                        uri: { type: "string", description: this._resolvePropertyDescription(McpLightBehavior.LightCreateFn, "uri", namespaceUriDesc) },
                         type: {
                             type: "string",
                             enum: ["point", "directional", "spot", "hemispheric"],
-                            description: this._buildToolPropertyDescription(McpLightBehavior.LightCreateFn, "type", undefined, "Type of light to create."),
+                            description: this._resolvePropertyDescription(McpLightBehavior.LightCreateFn, "type", "Type of light to create."),
                         },
-                        name: { type: "string", description: this._buildToolPropertyDescription(McpLightBehavior.LightCreateFn, "name", undefined, "Name for the new light. Must be unique in the scene.") },
-                        position: { ...vec3, description: this._buildToolPropertyDescription(McpLightBehavior.LightCreateFn, "position", undefined, "World-space position (right-handed y-up). Required for point and spot.") },
-                        direction: { ...vec3, description: this._buildToolPropertyDescription(McpLightBehavior.LightCreateFn, "direction", undefined, "Direction vector (right-handed y-up). Required for directional, spot, and hemispheric.") },
-                        angle: { type: "number", description: this._buildToolPropertyDescription(McpLightBehavior.LightCreateFn, "angle", undefined, "Cone half-angle in degrees. Required for spot. Must be in (0, 90).") },
-                        exponent: { type: "number", description: this._buildToolPropertyDescription(McpLightBehavior.LightCreateFn, "exponent", undefined, "Falloff exponent. Spot only, optional (default 2).") },
-                        intensity: { type: "number", description: this._buildToolPropertyDescription(McpLightBehavior.LightCreateFn, "intensity", undefined, "Initial intensity (default 1).") },
-                        diffuseColor: { ...color3, description: this._buildToolPropertyDescription(McpLightBehavior.LightCreateFn, "diffuseColor", undefined, "Initial diffuse color (default white).") },
-                        specularColor: { ...color3, description: this._buildToolPropertyDescription(McpLightBehavior.LightCreateFn, "specularColor", undefined, "Initial specular color (default white).") },
-                        groundColor: { ...color3, description: this._buildToolPropertyDescription(McpLightBehavior.LightCreateFn, "groundColor", undefined, "Initial ground color. Hemispheric only, optional.") },
-                        range: { type: "number", description: this._buildToolPropertyDescription(McpLightBehavior.LightCreateFn, "range", undefined, "Effective range in world units. Point and spot only, optional.") },
+                        name: { type: "string", description: this._resolvePropertyDescription(McpLightBehavior.LightCreateFn, "name", "Name for the new light. Must be unique in the scene.") },
+                        position: { ...vec3, description: this._resolvePropertyDescription(McpLightBehavior.LightCreateFn, "position", "World-space position (right-handed y-up). Required for point and spot.") },
+                        direction: { ...vec3, description: this._resolvePropertyDescription(McpLightBehavior.LightCreateFn, "direction", "Direction vector (right-handed y-up). Required for directional, spot, and hemispheric.") },
+                        angle: { type: "number", description: this._resolvePropertyDescription(McpLightBehavior.LightCreateFn, "angle", "Cone half-angle in degrees. Required for spot. Must be in (0, 90).") },
+                        exponent: { type: "number", description: this._resolvePropertyDescription(McpLightBehavior.LightCreateFn, "exponent", "Falloff exponent. Spot only, optional (default 2).") },
+                        intensity: { type: "number", description: this._resolvePropertyDescription(McpLightBehavior.LightCreateFn, "intensity", "Initial intensity (default 1).") },
+                        diffuseColor: { ...color3, description: this._resolvePropertyDescription(McpLightBehavior.LightCreateFn, "diffuseColor", "Initial diffuse color (default white).") },
+                        specularColor: { ...color3, description: this._resolvePropertyDescription(McpLightBehavior.LightCreateFn, "specularColor", "Initial specular color (default white).") },
+                        groundColor: { ...color3, description: this._resolvePropertyDescription(McpLightBehavior.LightCreateFn, "groundColor", "Initial ground color. Hemispheric only, optional.") },
+                        range: { type: "number", description: this._resolvePropertyDescription(McpLightBehavior.LightCreateFn, "range", "Effective range in world units. Point and spot only, optional.") },
                     },
                     required: ["uri", "type", "name"],
                     additionalProperties: false,
@@ -142,11 +258,11 @@ export class McpLightBehavior extends McpBehavior {
             // -----------------------------------------------------------------
             {
                 name: McpLightBehavior.LightRemoveFn,
-                description: this._buildToolDescription(McpLightBehavior.LightRemoveFn, undefined, "Removes a light from the scene and disposes all its resources."),
+                description: this._resolveToolDescription(McpLightBehavior.LightRemoveFn, "Removes a light from the scene and disposes all its resources."),
                 inputSchema: {
                     type: "object",
                     properties: {
-                        uri: { type: "string", description: this._buildToolPropertyDescription(McpLightBehavior.LightRemoveFn, "uri", undefined, lightUriDesc) },
+                        uri: { type: "string", description: this._resolvePropertyDescription(McpLightBehavior.LightRemoveFn, "uri", lightUriDesc) },
                     },
                     required: ["uri"],
                     additionalProperties: false,
@@ -158,12 +274,12 @@ export class McpLightBehavior extends McpBehavior {
             // -----------------------------------------------------------------
             {
                 name: McpLightBehavior.LightSetEnabledFn,
-                description: this._buildToolDescription(McpLightBehavior.LightSetEnabledFn, undefined, "Enables or disables a light without removing it from the scene."),
+                description: this._resolveToolDescription(McpLightBehavior.LightSetEnabledFn, "Enables or disables a light without removing it from the scene."),
                 inputSchema: {
                     type: "object",
                     properties: {
-                        uri: { type: "string", description: this._buildToolPropertyDescription(McpLightBehavior.LightSetEnabledFn, "uri", undefined, lightUriDesc) },
-                        enabled: { type: "boolean", description: this._buildToolPropertyDescription(McpLightBehavior.LightSetEnabledFn, "enabled", undefined, "True to enable the light, false to disable it.") },
+                        uri: { type: "string", description: this._resolvePropertyDescription(McpLightBehavior.LightSetEnabledFn, "uri", lightUriDesc) },
+                        enabled: { type: "boolean", description: this._resolvePropertyDescription(McpLightBehavior.LightSetEnabledFn, "enabled", "True to enable the light, false to disable it.") },
                     },
                     required: ["uri", "enabled"],
                     additionalProperties: false,
@@ -175,12 +291,12 @@ export class McpLightBehavior extends McpBehavior {
             // -----------------------------------------------------------------
             {
                 name: McpLightBehavior.LightSetIntensityFn,
-                description: this._buildToolDescription(McpLightBehavior.LightSetIntensityFn, undefined, "Sets the intensity (brightness multiplier) of a light. Default is 1. Values above 1 overbrighten."),
+                description: this._resolveToolDescription(McpLightBehavior.LightSetIntensityFn, "Sets the intensity (brightness multiplier) of a light. Default is 1. Values above 1 overbrighten."),
                 inputSchema: {
                     type: "object",
                     properties: {
-                        uri: { type: "string", description: this._buildToolPropertyDescription(McpLightBehavior.LightSetIntensityFn, "uri", undefined, lightUriDesc) },
-                        intensity: { type: "number", description: this._buildToolPropertyDescription(McpLightBehavior.LightSetIntensityFn, "intensity", undefined, "New intensity. Must be >= 0.") },
+                        uri: { type: "string", description: this._resolvePropertyDescription(McpLightBehavior.LightSetIntensityFn, "uri", lightUriDesc) },
+                        intensity: { type: "number", description: this._resolvePropertyDescription(McpLightBehavior.LightSetIntensityFn, "intensity", "New intensity. Must be >= 0.") },
                     },
                     required: ["uri", "intensity"],
                     additionalProperties: false,
@@ -192,11 +308,11 @@ export class McpLightBehavior extends McpBehavior {
             // -----------------------------------------------------------------
             {
                 name: McpLightBehavior.LightSetDiffuseColorFn,
-                description: this._buildToolDescription(McpLightBehavior.LightSetDiffuseColorFn, undefined, "Sets the diffuse (main) color emitted by a light. Channels are in [0, 1]."),
+                description: this._resolveToolDescription(McpLightBehavior.LightSetDiffuseColorFn, "Sets the diffuse (main) color emitted by a light. Channels are in [0, 1]."),
                 inputSchema: {
                     type: "object",
                     properties: {
-                        uri: { type: "string", description: this._buildToolPropertyDescription(McpLightBehavior.LightSetDiffuseColorFn, "uri", undefined, lightUriDesc) },
+                        uri: { type: "string", description: this._resolvePropertyDescription(McpLightBehavior.LightSetDiffuseColorFn, "uri", lightUriDesc) },
                         color: color3,
                     },
                     required: ["uri", "color"],
@@ -209,11 +325,11 @@ export class McpLightBehavior extends McpBehavior {
             // -----------------------------------------------------------------
             {
                 name: McpLightBehavior.LightSetSpecularColorFn,
-                description: this._buildToolDescription(McpLightBehavior.LightSetSpecularColorFn, undefined, "Sets the specular (highlight) color emitted by a light. Channels are in [0, 1]."),
+                description: this._resolveToolDescription(McpLightBehavior.LightSetSpecularColorFn, "Sets the specular (highlight) color emitted by a light. Channels are in [0, 1]."),
                 inputSchema: {
                     type: "object",
                     properties: {
-                        uri: { type: "string", description: this._buildToolPropertyDescription(McpLightBehavior.LightSetSpecularColorFn, "uri", undefined, lightUriDesc) },
+                        uri: { type: "string", description: this._resolvePropertyDescription(McpLightBehavior.LightSetSpecularColorFn, "uri", lightUriDesc) },
                         color: color3,
                     },
                     required: ["uri", "color"],
@@ -226,9 +342,8 @@ export class McpLightBehavior extends McpBehavior {
             // -----------------------------------------------------------------
             {
                 name: McpLightBehavior.LightSetPositionFn,
-                description: this._buildToolDescription(
+                description: this._resolveToolDescription(
                     McpLightBehavior.LightSetPositionFn,
-                    undefined,
                     "Sets the world-space position of a light. " +
                         "For point and spot lights this is the emission origin. " +
                         "For directional lights it only moves the shadow-frustum origin (no effect on light direction). " +
@@ -237,8 +352,8 @@ export class McpLightBehavior extends McpBehavior {
                 inputSchema: {
                     type: "object",
                     properties: {
-                        uri: { type: "string", description: this._buildToolPropertyDescription(McpLightBehavior.LightSetPositionFn, "uri", undefined, lightUriDesc) },
-                        position: { ...vec3, description: this._buildToolPropertyDescription(McpLightBehavior.LightSetPositionFn, "position", undefined, "New world-space position (right-handed y-up).") },
+                        uri: { type: "string", description: this._resolvePropertyDescription(McpLightBehavior.LightSetPositionFn, "uri", lightUriDesc) },
+                        position: { ...vec3, description: this._resolvePropertyDescription(McpLightBehavior.LightSetPositionFn, "position", "New world-space position (right-handed y-up).") },
                     },
                     required: ["uri", "position"],
                     additionalProperties: false,
@@ -250,9 +365,8 @@ export class McpLightBehavior extends McpBehavior {
             // -----------------------------------------------------------------
             {
                 name: McpLightBehavior.LightSetDirectionFn,
-                description: this._buildToolDescription(
+                description: this._resolveToolDescription(
                     McpLightBehavior.LightSetDirectionFn,
-                    undefined,
                     "Sets the direction vector of a directional, spot, or hemispheric light. " +
                         "The vector is normalised internally. " +
                         "For hemispheric lights, direction points toward the sky (bright hemisphere). " +
@@ -261,8 +375,8 @@ export class McpLightBehavior extends McpBehavior {
                 inputSchema: {
                     type: "object",
                     properties: {
-                        uri: { type: "string", description: this._buildToolPropertyDescription(McpLightBehavior.LightSetDirectionFn, "uri", undefined, lightUriDesc) },
-                        direction: { ...vec3, description: this._buildToolPropertyDescription(McpLightBehavior.LightSetDirectionFn, "direction", undefined, "New direction vector (right-handed y-up). Will be normalised.") },
+                        uri: { type: "string", description: this._resolvePropertyDescription(McpLightBehavior.LightSetDirectionFn, "uri", lightUriDesc) },
+                        direction: { ...vec3, description: this._resolvePropertyDescription(McpLightBehavior.LightSetDirectionFn, "direction", "New direction vector (right-handed y-up). Will be normalised.") },
                     },
                     required: ["uri", "direction"],
                     additionalProperties: false,
@@ -274,9 +388,8 @@ export class McpLightBehavior extends McpBehavior {
             // -----------------------------------------------------------------
             {
                 name: McpLightBehavior.LightSetTargetFn,
-                description: this._buildToolDescription(
+                description: this._resolveToolDescription(
                     McpLightBehavior.LightSetTargetFn,
-                    undefined,
                     "Aims a spot or directional light at a world-space target point. " +
                         "Computes direction = normalize(target − position). " +
                         "Only applicable to spot and directional lights (requires a position)."
@@ -284,8 +397,8 @@ export class McpLightBehavior extends McpBehavior {
                 inputSchema: {
                     type: "object",
                     properties: {
-                        uri: { type: "string", description: this._buildToolPropertyDescription(McpLightBehavior.LightSetTargetFn, "uri", undefined, lightUriDesc) },
-                        target: { ...vec3, description: this._buildToolPropertyDescription(McpLightBehavior.LightSetTargetFn, "target", undefined, "World-space point to aim the light at (right-handed y-up).") },
+                        uri: { type: "string", description: this._resolvePropertyDescription(McpLightBehavior.LightSetTargetFn, "uri", lightUriDesc) },
+                        target: { ...vec3, description: this._resolvePropertyDescription(McpLightBehavior.LightSetTargetFn, "target", "World-space point to aim the light at (right-handed y-up).") },
                     },
                     required: ["uri", "target"],
                     additionalProperties: false,
@@ -297,16 +410,15 @@ export class McpLightBehavior extends McpBehavior {
             // -----------------------------------------------------------------
             {
                 name: McpLightBehavior.LightSetRangeFn,
-                description: this._buildToolDescription(
+                description: this._resolveToolDescription(
                     McpLightBehavior.LightSetRangeFn,
-                    undefined,
                     "Sets the effective range of a point or spot light. Beyond this distance the light contributes nothing. Not applicable to directional or hemispheric lights."
                 ),
                 inputSchema: {
                     type: "object",
                     properties: {
-                        uri: { type: "string", description: this._buildToolPropertyDescription(McpLightBehavior.LightSetRangeFn, "uri", undefined, lightUriDesc) },
-                        range: { type: "number", description: this._buildToolPropertyDescription(McpLightBehavior.LightSetRangeFn, "range", undefined, "Range in world units. Must be > 0.") },
+                        uri: { type: "string", description: this._resolvePropertyDescription(McpLightBehavior.LightSetRangeFn, "uri", lightUriDesc) },
+                        range: { type: "number", description: this._resolvePropertyDescription(McpLightBehavior.LightSetRangeFn, "range", "Range in world units. Must be > 0.") },
                     },
                     required: ["uri", "range"],
                     additionalProperties: false,
@@ -318,12 +430,12 @@ export class McpLightBehavior extends McpBehavior {
             // -----------------------------------------------------------------
             {
                 name: McpLightBehavior.LightSpotSetAngleFn,
-                description: this._buildToolDescription(McpLightBehavior.LightSpotSetAngleFn, undefined, "Sets the cone half-angle of a spot light in degrees. Smaller angle = tighter, more focused beam. Only applicable to spot lights."),
+                description: this._resolveToolDescription(McpLightBehavior.LightSpotSetAngleFn, "Sets the cone half-angle of a spot light in degrees. Smaller angle = tighter, more focused beam. Only applicable to spot lights."),
                 inputSchema: {
                     type: "object",
                     properties: {
-                        uri: { type: "string", description: this._buildToolPropertyDescription(McpLightBehavior.LightSpotSetAngleFn, "uri", undefined, lightUriDesc) },
-                        angle: { type: "number", description: this._buildToolPropertyDescription(McpLightBehavior.LightSpotSetAngleFn, "angle", undefined, "Cone half-angle in degrees. Must be in (0, 90).") },
+                        uri: { type: "string", description: this._resolvePropertyDescription(McpLightBehavior.LightSpotSetAngleFn, "uri", lightUriDesc) },
+                        angle: { type: "number", description: this._resolvePropertyDescription(McpLightBehavior.LightSpotSetAngleFn, "angle", "Cone half-angle in degrees. Must be in (0, 90).") },
                     },
                     required: ["uri", "angle"],
                     additionalProperties: false,
@@ -335,12 +447,12 @@ export class McpLightBehavior extends McpBehavior {
             // -----------------------------------------------------------------
             {
                 name: McpLightBehavior.LightSpotSetExponentFn,
-                description: this._buildToolDescription(McpLightBehavior.LightSpotSetExponentFn, undefined, "Sets the falloff exponent of a spot light. Higher values concentrate the light toward the cone axis. Only applicable to spot lights."),
+                description: this._resolveToolDescription(McpLightBehavior.LightSpotSetExponentFn, "Sets the falloff exponent of a spot light. Higher values concentrate the light toward the cone axis. Only applicable to spot lights."),
                 inputSchema: {
                     type: "object",
                     properties: {
-                        uri: { type: "string", description: this._buildToolPropertyDescription(McpLightBehavior.LightSpotSetExponentFn, "uri", undefined, lightUriDesc) },
-                        exponent: { type: "number", description: this._buildToolPropertyDescription(McpLightBehavior.LightSpotSetExponentFn, "exponent", undefined, "Falloff exponent. Must be >= 0.") },
+                        uri: { type: "string", description: this._resolvePropertyDescription(McpLightBehavior.LightSpotSetExponentFn, "uri", lightUriDesc) },
+                        exponent: { type: "number", description: this._resolvePropertyDescription(McpLightBehavior.LightSpotSetExponentFn, "exponent", "Falloff exponent. Must be >= 0.") },
                     },
                     required: ["uri", "exponent"],
                     additionalProperties: false,
@@ -352,11 +464,11 @@ export class McpLightBehavior extends McpBehavior {
             // -----------------------------------------------------------------
             {
                 name: McpLightBehavior.LightHemiSetGroundColorFn,
-                description: this._buildToolDescription(McpLightBehavior.LightHemiSetGroundColorFn, undefined, "Sets the ground (bottom hemisphere) color of a hemispheric light. Channels are in [0, 1]. Only applicable to hemispheric lights."),
+                description: this._resolveToolDescription(McpLightBehavior.LightHemiSetGroundColorFn, "Sets the ground (bottom hemisphere) color of a hemispheric light. Channels are in [0, 1]. Only applicable to hemispheric lights."),
                 inputSchema: {
                     type: "object",
                     properties: {
-                        uri: { type: "string", description: this._buildToolPropertyDescription(McpLightBehavior.LightHemiSetGroundColorFn, "uri", undefined, lightUriDesc) },
+                        uri: { type: "string", description: this._resolvePropertyDescription(McpLightBehavior.LightHemiSetGroundColorFn, "uri", lightUriDesc) },
                         color: color3,
                     },
                     required: ["uri", "color"],
@@ -369,11 +481,11 @@ export class McpLightBehavior extends McpBehavior {
             // -----------------------------------------------------------------
             {
                 name: McpLightBehavior.SceneGetAmbientFn,
-                description: this._buildToolDescription(McpLightBehavior.SceneGetAmbientFn, undefined, "Returns the current scene-level ambient light: enabled state and color (r, g, b in [0, 1])."),
+                description: this._resolveToolDescription(McpLightBehavior.SceneGetAmbientFn, "Returns the current scene-level ambient light: enabled state and color (r, g, b in [0, 1])."),
                 inputSchema: {
                     type: "object",
                     properties: {
-                        uri: { type: "string", description: this._buildToolPropertyDescription(McpLightBehavior.SceneGetAmbientFn, "uri", undefined, namespaceUriDesc) },
+                        uri: { type: "string", description: this._resolvePropertyDescription(McpLightBehavior.SceneGetAmbientFn, "uri", namespaceUriDesc) },
                     },
                     required: ["uri"],
                     additionalProperties: false,
@@ -385,11 +497,11 @@ export class McpLightBehavior extends McpBehavior {
             // -----------------------------------------------------------------
             {
                 name: McpLightBehavior.SceneSetAmbientColorFn,
-                description: this._buildToolDescription(McpLightBehavior.SceneSetAmbientColorFn, undefined, "Sets the scene ambient color (scene.ambientColor). Affects all materials that use ambient. Channels are in [0, 1]."),
+                description: this._resolveToolDescription(McpLightBehavior.SceneSetAmbientColorFn, "Sets the scene ambient color (scene.ambientColor). Affects all materials that use ambient. Channels are in [0, 1]."),
                 inputSchema: {
                     type: "object",
                     properties: {
-                        uri: { type: "string", description: this._buildToolPropertyDescription(McpLightBehavior.SceneSetAmbientColorFn, "uri", undefined, namespaceUriDesc) },
+                        uri: { type: "string", description: this._resolvePropertyDescription(McpLightBehavior.SceneSetAmbientColorFn, "uri", namespaceUriDesc) },
                         color: color3,
                     },
                     required: ["uri", "color"],
@@ -402,12 +514,12 @@ export class McpLightBehavior extends McpBehavior {
             // -----------------------------------------------------------------
             {
                 name: McpLightBehavior.SceneSetAmbientEnabledFn,
-                description: this._buildToolDescription(McpLightBehavior.SceneSetAmbientEnabledFn, undefined, "Enables or disables scene ambient lighting. When disabled, scene.ambientColor is set to black; the previous color is restored when re-enabled."),
+                description: this._resolveToolDescription(McpLightBehavior.SceneSetAmbientEnabledFn, "Enables or disables scene ambient lighting. When disabled, scene.ambientColor is set to black; the previous color is restored when re-enabled."),
                 inputSchema: {
                     type: "object",
                     properties: {
-                        uri: { type: "string", description: this._buildToolPropertyDescription(McpLightBehavior.SceneSetAmbientEnabledFn, "uri", undefined, namespaceUriDesc) },
-                        enabled: { type: "boolean", description: this._buildToolPropertyDescription(McpLightBehavior.SceneSetAmbientEnabledFn, "enabled", undefined, "True to enable ambient, false to disable.") },
+                        uri: { type: "string", description: this._resolvePropertyDescription(McpLightBehavior.SceneSetAmbientEnabledFn, "uri", namespaceUriDesc) },
+                        enabled: { type: "boolean", description: this._resolvePropertyDescription(McpLightBehavior.SceneSetAmbientEnabledFn, "enabled", "True to enable ambient, false to disable.") },
                     },
                     required: ["uri", "enabled"],
                     additionalProperties: false,
@@ -419,9 +531,8 @@ export class McpLightBehavior extends McpBehavior {
             // -----------------------------------------------------------------
             {
                 name: McpLightBehavior.LightUpdateFn,
-                description: this._buildToolDescription(
+                description: this._resolveToolDescription(
                     McpLightBehavior.LightUpdateFn,
-                    undefined,
                     "Applies a partial patch to an existing light in one call. " +
                         "Fields that are not applicable to the light type are silently ignored (reported in the response). " +
                         "Useful for batching multiple property changes without issuing separate tool calls."
@@ -429,21 +540,21 @@ export class McpLightBehavior extends McpBehavior {
                 inputSchema: {
                     type: "object",
                     properties: {
-                        uri: { type: "string", description: this._buildToolPropertyDescription(McpLightBehavior.LightUpdateFn, "uri", undefined, lightUriDesc) },
+                        uri: { type: "string", description: this._resolvePropertyDescription(McpLightBehavior.LightUpdateFn, "uri", lightUriDesc) },
                         patch: {
                             type: "object",
-                            description: this._buildToolPropertyDescription(McpLightBehavior.LightUpdateFn, "patch", undefined, "Partial state to apply. All fields optional."),
+                            description: this._resolvePropertyDescription(McpLightBehavior.LightUpdateFn, "patch", "Partial state to apply. All fields optional."),
                             properties: {
                                 enabled: { type: "boolean" },
                                 intensity: { type: "number" },
                                 diffuseColor: color3,
                                 specularColor: color3,
-                                position: { ...vec3, description: this._buildToolPropertyDescription(McpLightBehavior.LightUpdateFn, "patch.position", undefined, "point, spot, directional (shadow frustum).") },
-                                direction: { ...vec3, description: this._buildToolPropertyDescription(McpLightBehavior.LightUpdateFn, "patch.direction", undefined, "directional, spot, hemispheric.") },
-                                range: { type: "number", description: this._buildToolPropertyDescription(McpLightBehavior.LightUpdateFn, "patch.range", undefined, "point, spot only.") },
-                                angle: { type: "number", description: this._buildToolPropertyDescription(McpLightBehavior.LightUpdateFn, "patch.angle", undefined, "Spot only. Cone half-angle in degrees.") },
-                                exponent: { type: "number", description: this._buildToolPropertyDescription(McpLightBehavior.LightUpdateFn, "patch.exponent", undefined, "Spot only. Falloff exponent.") },
-                                groundColor: { ...color3, description: this._buildToolPropertyDescription(McpLightBehavior.LightUpdateFn, "patch.groundColor", undefined, "Hemispheric only. Ground color.") },
+                                position: { ...vec3, description: this._resolvePropertyDescription(McpLightBehavior.LightUpdateFn, "patch.position", "point, spot, directional (shadow frustum).") },
+                                direction: { ...vec3, description: this._resolvePropertyDescription(McpLightBehavior.LightUpdateFn, "patch.direction", "directional, spot, hemispheric.") },
+                                range: { type: "number", description: this._resolvePropertyDescription(McpLightBehavior.LightUpdateFn, "patch.range", "point, spot only.") },
+                                angle: { type: "number", description: this._resolvePropertyDescription(McpLightBehavior.LightUpdateFn, "patch.angle", "Spot only. Cone half-angle in degrees.") },
+                                exponent: { type: "number", description: this._resolvePropertyDescription(McpLightBehavior.LightUpdateFn, "patch.exponent", "Spot only. Falloff exponent.") },
+                                groundColor: { ...color3, description: this._resolvePropertyDescription(McpLightBehavior.LightUpdateFn, "patch.groundColor", "Hemispheric only. Ground color.") },
                             },
                             additionalProperties: false,
                         },

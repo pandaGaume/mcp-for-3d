@@ -1,4 +1,4 @@
-import { IMcpBehaviorAdapter, JsonRpcMimeType, McpBehavior, McpBehaviorOptions, McpResource, McpResourceTemplate, McpTool } from "@dev/core";
+import { IMcpBehaviorAdapter, JsonRpcMimeType, McpBehavior, McpBehaviorOptions, McpGrammar, McpResource, McpResourceTemplate, McpTool } from "@dev/core";
 import { coordinateSchema } from "@dev/geodesy";
 import { McpCameraNamespace } from "../mcp.commons";
 
@@ -82,6 +82,283 @@ export class McpCameraBehavior extends McpBehavior {
         });
     }
 
+    protected override _buildDefaultGrammar(): McpGrammar {
+        const g = new McpGrammar();
+
+        // Easing description shared by animation tools.
+        const easingDesc =
+            "Easing curve. Format '<type>' or '<type>.<mode>'. " +
+            "Types: linear | sine | quad | cubic | circle | expo | back | bounce | elastic. " +
+            "Modes: in | out | inout (default). " +
+            "Examples: 'sine.inout', 'elastic.out', 'bounce.out', 'back.in'.";
+
+        // -- camera_set_target --
+        g.setToolDescription(
+            McpCameraBehavior.CameraSetTargetFn,
+            "Sets the camera look-at point by calling TargetCamera.setTarget(). Accepts Cartesian {x,y,z} (right-handed y-up) or geographic {lat,lon,alt?} (WGS84 degrees)."
+        );
+        g.setPropertyDescription(McpCameraBehavior.CameraSetTargetFn, "uri", "Camera URI, e.g. babylon://camera/MyCamera");
+        g.setPropertyDescription(McpCameraBehavior.CameraSetTargetFn, "target", "World-space look-at point. Cartesian {x,y,z} or geographic {lat,lon,alt?}.");
+
+        // -- camera_set_position --
+        g.setToolDescription(
+            McpCameraBehavior.CameraSetPositionFn,
+            "Teleports the camera to an absolute world-space position. " +
+                "Accepts Cartesian {x,y,z} or geographic {lat,lon,alt?}. " +
+                "For ArcRotateCamera this recalculates alpha, beta and radius automatically."
+        );
+        g.setPropertyDescription(McpCameraBehavior.CameraSetPositionFn, "uri", "Camera URI");
+        g.setPropertyDescription(McpCameraBehavior.CameraSetPositionFn, "position", "New camera position. Cartesian {x,y,z} or geographic {lat,lon,alt?}.");
+
+        // -- camera_look_at --
+        g.setToolDescription(
+            McpCameraBehavior.CameraLookAtFn,
+            "Moves the camera to a world-space position AND sets its look-at target in a single call. " +
+                "Accepts Cartesian {x,y,z} or geographic {lat,lon,alt?} for both position and target. " +
+                "The ideal 'place the camera here and frame that subject' director operation."
+        );
+        g.setPropertyDescription(McpCameraBehavior.CameraLookAtFn, "uri", "Camera URI");
+        g.setPropertyDescription(McpCameraBehavior.CameraLookAtFn, "position", "New camera position. Cartesian {x,y,z} or geographic {lat,lon,alt?}.");
+        g.setPropertyDescription(McpCameraBehavior.CameraLookAtFn, "target", "World-space look-at point. Cartesian {x,y,z} or geographic {lat,lon,alt?}.");
+
+        // -- camera_orbit --
+        g.setToolDescription(
+            McpCameraBehavior.CameraOrbitFn,
+            "Rotates the camera around its current look-at target by incremental angles. " +
+                "deltaAlpha spins horizontally (azimuth); deltaBeta tilts vertically (elevation). " +
+                "For ArcRotateCamera this directly adjusts alpha/beta; " +
+                "for other TargetCameras the position is rotated around the target point."
+        );
+        g.setPropertyDescription(McpCameraBehavior.CameraOrbitFn, "uri", "Camera URI");
+        g.setPropertyDescription(McpCameraBehavior.CameraOrbitFn, "deltaAlpha", "Horizontal rotation delta in degrees. Positive = counter-clockwise when viewed from above.");
+        g.setPropertyDescription(McpCameraBehavior.CameraOrbitFn, "deltaBeta", "Vertical rotation delta in degrees. Positive = tilt down (toward ground).");
+
+        // -- camera_set_fov --
+        g.setToolDescription(
+            McpCameraBehavior.CameraSetFovFn,
+            "Sets the vertical field of view on a perspective camera. " +
+                "Low values (< 30°) give a telephoto / compressed look; " +
+                "high values (> 75°) give a wide-angle look. " +
+                "Returns an error if the camera is in orthographic mode."
+        );
+        g.setPropertyDescription(McpCameraBehavior.CameraSetFovFn, "uri", "Camera URI");
+        g.setPropertyDescription(McpCameraBehavior.CameraSetFovFn, "fov", "Field-of-view value.");
+        g.setPropertyDescription(McpCameraBehavior.CameraSetFovFn, "unit", "Unit of the fov value. Defaults to 'deg' if omitted.");
+
+        // -- camera_zoom --
+        g.setToolDescription(
+            McpCameraBehavior.CameraZoomFn,
+            "Applies a relative zoom. factor < 1 zooms in, factor > 1 zooms out. " +
+                "For perspective cameras this scales the FOV (lens zoom). " +
+                "For orthographic cameras it scales the frustum bounds. " +
+                "For ArcRotateCamera it scales the orbit radius (physical dolly)."
+        );
+        g.setPropertyDescription(McpCameraBehavior.CameraZoomFn, "uri", "Camera URI");
+        g.setPropertyDescription(McpCameraBehavior.CameraZoomFn, "factor", "Zoom multiplier. Must be > 0. factor < 1 zooms in, factor > 1 zooms out.");
+
+        // -- camera_set_projection --
+        g.setToolDescription(McpCameraBehavior.CameraSetProjectionFn, "Switches the camera between perspective and orthographic projection.");
+        g.setPropertyDescription(McpCameraBehavior.CameraSetProjectionFn, "uri", "Camera URI");
+        g.setPropertyDescription(McpCameraBehavior.CameraSetProjectionFn, "mode", "Target projection mode.");
+        g.setPropertyDescription(McpCameraBehavior.CameraSetProjectionFn, "fov", "Vertical FOV in degrees to apply when switching to perspective (optional).");
+        g.setPropertyDescription(
+            McpCameraBehavior.CameraSetProjectionFn,
+            "orthoSize",
+            "Frustum height in world units when switching to orthographic (optional). Left/right bounds are derived from the viewport aspect ratio."
+        );
+
+        // -- camera_dolly --
+        g.setToolDescription(
+            McpCameraBehavior.CameraDollyFn,
+            "Physically moves the camera toward (+) or away from (-) its look-at target along the view axis. " +
+                "Unlike zoom this actually moves the camera, affecting depth-of-field and parallax. " +
+                "For ArcRotateCamera it adjusts the orbit radius."
+        );
+        g.setPropertyDescription(McpCameraBehavior.CameraDollyFn, "uri", "Camera URI");
+        g.setPropertyDescription(McpCameraBehavior.CameraDollyFn, "distance", "World-unit distance to move. Positive = closer to target, negative = further away.");
+
+        // -- camera_pan --
+        g.setToolDescription(
+            McpCameraBehavior.CameraPanFn,
+            "Slides the camera and its look-at target together perpendicular to the view axis. " +
+                "deltaX moves along the camera's right vector; deltaY along the camera's screen-up vector. " +
+                "This is a steady-cam pan: the subject stays framed at the same angle and distance."
+        );
+        g.setPropertyDescription(McpCameraBehavior.CameraPanFn, "uri", "Camera URI");
+        g.setPropertyDescription(McpCameraBehavior.CameraPanFn, "deltaX", "World-units to slide horizontally along the camera right vector. Positive = slide right.");
+        g.setPropertyDescription(McpCameraBehavior.CameraPanFn, "deltaY", "World-units to slide vertically along the camera up vector. Positive = slide up.");
+
+        // -- camera_lock --
+        g.setToolDescription(
+            McpCameraBehavior.CameraLockFn,
+            "Detaches user input from the camera (cinematic lock). " + "Mouse, keyboard and touch events will no longer move the camera until camera.unlock is called."
+        );
+        g.setPropertyDescription(McpCameraBehavior.CameraLockFn, "uri", "Camera URI");
+
+        // -- camera_unlock --
+        g.setToolDescription(McpCameraBehavior.CameraUnlockFn, "Re-attaches user input to the camera, restoring interactive control after a cinematic lock.");
+        g.setPropertyDescription(McpCameraBehavior.CameraUnlockFn, "uri", "Camera URI");
+
+        // -- camera_snapshot --
+        g.setToolDescription(
+            McpCameraBehavior.CameraSnapshotFn,
+            "Captures a screenshot from the camera's point of view and returns it as a base64-encoded PNG. " +
+                "Renders off-screen at any resolution, independent of the canvas size. " +
+                "Specify width + height for an explicit pixel resolution, or precision to scale relative to the current viewport (1.0 = native)."
+        );
+        g.setPropertyDescription(McpCameraBehavior.CameraSnapshotFn, "uri", "Camera URI");
+        g.setPropertyDescription(
+            McpCameraBehavior.CameraSnapshotFn,
+            "size",
+            "Output image dimensions. Provide { width, height } for an explicit resolution (pixels), or { precision } to scale relative to the current viewport (1.0 = native resolution, 2.0 = double). Omit entirely to capture at native viewport resolution."
+        );
+        g.setPropertyDescription(McpCameraBehavior.CameraSnapshotFn, "size.width", "Output width in pixels. Must be accompanied by height.");
+        g.setPropertyDescription(McpCameraBehavior.CameraSnapshotFn, "size.height", "Output height in pixels. Must be accompanied by width.");
+        g.setPropertyDescription(McpCameraBehavior.CameraSnapshotFn, "size.precision", "Scale factor relative to the current viewport size. Cannot be combined with width/height.");
+
+        // -- camera_animate_to --
+        g.setToolDescription(
+            McpCameraBehavior.CameraAnimateToFn,
+            "Smoothly animates the camera to a new position, look-at target and/or FOV over the given duration. " +
+                "All specified properties are interpolated simultaneously. " +
+                "Properties that are omitted remain unchanged."
+        );
+        g.setPropertyDescription(McpCameraBehavior.CameraAnimateToFn, "uri", "Camera URI");
+        g.setPropertyDescription(
+            McpCameraBehavior.CameraAnimateToFn,
+            "position",
+            "Destination position. Cartesian {x,y,z} or geographic {lat,lon,alt?}. Omit to keep the current position."
+        );
+        g.setPropertyDescription(
+            McpCameraBehavior.CameraAnimateToFn,
+            "target",
+            "Destination look-at point. Cartesian {x,y,z} or geographic {lat,lon,alt?}. Omit to keep the current target."
+        );
+        g.setPropertyDescription(
+            McpCameraBehavior.CameraAnimateToFn,
+            "fov",
+            "Destination vertical FOV in degrees. Only applies to perspective cameras. Omit to keep the current FOV."
+        );
+        g.setPropertyDescription(McpCameraBehavior.CameraAnimateToFn, "duration", "Animation duration in seconds. Defaults to 1.");
+        g.setPropertyDescription(McpCameraBehavior.CameraAnimateToFn, "easing", easingDesc);
+
+        // -- camera_animate_orbit --
+        g.setToolDescription(
+            McpCameraBehavior.CameraAnimateOrbitFn,
+            "Smoothly rotates the camera around its current look-at target. " +
+                "deltaAlpha sweeps the horizontal azimuth, deltaBeta tilts the elevation. " +
+                "Set loop:true for a continuous turntable at constant angular velocity " +
+                "(easing is ignored in loop mode to keep the motion smooth across cycles)."
+        );
+        g.setPropertyDescription(McpCameraBehavior.CameraAnimateOrbitFn, "uri", "Camera URI");
+        g.setPropertyDescription(
+            McpCameraBehavior.CameraAnimateOrbitFn,
+            "deltaAlpha",
+            "Total horizontal rotation in degrees over one duration. Positive = counter-clockwise viewed from above."
+        );
+        g.setPropertyDescription(
+            McpCameraBehavior.CameraAnimateOrbitFn,
+            "deltaBeta",
+            "Total vertical rotation in degrees over one duration. Positive = tilt down toward ground."
+        );
+        g.setPropertyDescription(McpCameraBehavior.CameraAnimateOrbitFn, "duration", "Duration in seconds for one full sweep. Defaults to 2.");
+        g.setPropertyDescription(
+            McpCameraBehavior.CameraAnimateOrbitFn,
+            "loop",
+            "If true, rotates continuously at constant speed until camera.stopAnimation is called."
+        );
+        g.setPropertyDescription(McpCameraBehavior.CameraAnimateOrbitFn, "easing", easingDesc);
+
+        // -- camera_follow_path --
+        g.setToolDescription(
+            McpCameraBehavior.CameraFollowPathFn,
+            "Moves the camera through an ordered sequence of world-space waypoints over the given duration. " +
+                "Position and look-at target are linearly interpolated between adjacent waypoints. " +
+                "If a waypoint omits position or target, that value carries forward from the previous waypoint."
+        );
+        g.setPropertyDescription(McpCameraBehavior.CameraFollowPathFn, "uri", "Camera URI");
+        g.setPropertyDescription(McpCameraBehavior.CameraFollowPathFn, "waypoints", "Ordered list of camera waypoints. At least 2 required.");
+        g.setPropertyDescription(
+            McpCameraBehavior.CameraFollowPathFn,
+            "waypoints.position",
+            "Camera position at this waypoint. Cartesian {x,y,z} or geographic {lat,lon,alt?}. Omit to carry forward from the previous waypoint."
+        );
+        g.setPropertyDescription(
+            McpCameraBehavior.CameraFollowPathFn,
+            "waypoints.target",
+            "Look-at point at this waypoint. Cartesian {x,y,z} or geographic {lat,lon,alt?}. Omit to carry forward from the previous waypoint."
+        );
+        g.setPropertyDescription(McpCameraBehavior.CameraFollowPathFn, "duration", "Total flight duration in seconds. Defaults to 3.");
+        g.setPropertyDescription(McpCameraBehavior.CameraFollowPathFn, "easing", easingDesc);
+
+        // -- camera_shake --
+        g.setToolDescription(
+            McpCameraBehavior.CameraShakeFn,
+            "Applies a procedural trauma shake to the camera for the given duration. " +
+                "The effect oscillates the look-at target with layered sinusoids whose amplitude decays to zero by the end. " +
+                "The camera automatically returns to its original look-at point when the shake completes."
+        );
+        g.setPropertyDescription(McpCameraBehavior.CameraShakeFn, "uri", "Camera URI");
+        g.setPropertyDescription(McpCameraBehavior.CameraShakeFn, "intensity", "Peak shake amplitude in world units. Defaults to 0.5.");
+        g.setPropertyDescription(McpCameraBehavior.CameraShakeFn, "duration", "Shake duration in seconds. Defaults to 1.");
+        g.setPropertyDescription(McpCameraBehavior.CameraShakeFn, "frequency", "Base oscillation frequency in Hz. Defaults to 12.");
+
+        // -- camera_stop_animation --
+        g.setToolDescription(
+            McpCameraBehavior.CameraStopAnimationFn,
+            "Stops any currently running animation on the camera (animateTo, animateOrbit, followPath, shake), leaving it at its current interpolated state."
+        );
+        g.setPropertyDescription(McpCameraBehavior.CameraStopAnimationFn, "uri", "Camera URI");
+
+        // -- scene_visible_objects --
+        g.setToolDescription(
+            McpCameraBehavior.SceneVisibleObjectsFn,
+            "Returns a structured list of all scene meshes currently visible from a camera. " +
+                "Use this instead of camera_snapshot to understand what the camera sees — no image required. " +
+                "Each entry includes position, bounding box, material color and flags, filtered to the frustum. " +
+                "Results are sorted by distance (closest first) unless sortBy overrides it."
+        );
+        g.setPropertyDescription(McpCameraBehavior.SceneVisibleObjectsFn, "uri", "Camera URI, e.g. babylon://camera/MyCamera");
+        g.setPropertyDescription(McpCameraBehavior.SceneVisibleObjectsFn, "maxObjects", "Maximum number of objects to return. Defaults to 50.");
+        g.setPropertyDescription(
+            McpCameraBehavior.SceneVisibleObjectsFn,
+            "include",
+            "Fields to include in each object entry. Omit or leave empty for all fields. Valid values: transform, bounds, material, color, visibility, tags."
+        );
+        g.setPropertyDescription(McpCameraBehavior.SceneVisibleObjectsFn, "onlyPickable", "If true, only include meshes that are pickable. Defaults to false.");
+        g.setPropertyDescription(
+            McpCameraBehavior.SceneVisibleObjectsFn,
+            "minScreenCoverage",
+            "Minimum fraction of screen area (0..1) the mesh bounding box must cover to be included. Defaults to 0.001."
+        );
+        g.setPropertyDescription(
+            McpCameraBehavior.SceneVisibleObjectsFn,
+            "layerMask",
+            "Optional layer mask filter. Only meshes whose layerMask shares at least one bit are included."
+        );
+        g.setPropertyDescription(McpCameraBehavior.SceneVisibleObjectsFn, "sortBy", "Sort order for the visible list. Defaults to 'distance' (closest first).");
+
+        // -- scene_pick_from_center --
+        g.setToolDescription(
+            McpCameraBehavior.ScenePickFromCenterFn,
+            "Casts a ray from the camera through a normalized screen point and returns the first mesh hit. " +
+                "Useful for answering 'what am I looking at?' — defaults to the screen center (crosshair pick). " +
+                "Returns the hit mesh, world-space impact point, surface normal, and distance."
+        );
+        g.setPropertyDescription(McpCameraBehavior.ScenePickFromCenterFn, "uri", "Camera URI, e.g. babylon://camera/MyCamera");
+        g.setPropertyDescription(McpCameraBehavior.ScenePickFromCenterFn, "screenPoint", "Normalized screen position to cast from. Defaults to center (0.5, 0.5).");
+        g.setPropertyDescription(McpCameraBehavior.ScenePickFromCenterFn, "screenPoint.x", "Horizontal position (0 = left edge, 1 = right edge).");
+        g.setPropertyDescription(McpCameraBehavior.ScenePickFromCenterFn, "screenPoint.y", "Vertical position (0 = top edge, 1 = bottom edge).");
+        g.setPropertyDescription(McpCameraBehavior.ScenePickFromCenterFn, "maxDistance", "Maximum ray distance in world units. Defaults to unlimited.");
+        g.setPropertyDescription(
+            McpCameraBehavior.ScenePickFromCenterFn,
+            "allHits",
+            "If true, returns all meshes intersected by the ray (including those behind the first hit), sorted by distance in the hits array. Useful when objects are stacked or partially occluded. Defaults to false (closest hit only)."
+        );
+
+        return g;
+    }
+
     protected override _buildTools(): McpTool[] {
         // Reusable JSON-Schema fragment for a world-space XYZ vector (right-handed y-up).
         // Reusable easing parameter description shared by all animation tools.
@@ -103,9 +380,8 @@ export class McpCameraBehavior extends McpBehavior {
             // -----------------------------------------------------------------
             {
                 name: McpCameraBehavior.CameraSetTargetFn,
-                description: this._buildToolDescription(
+                description: this._resolveToolDescription(
                     McpCameraBehavior.CameraSetTargetFn,
-                    undefined,
                     "Sets the camera look-at point by calling TargetCamera.setTarget(). Accepts Cartesian {x,y,z} (right-handed y-up) or geographic {lat,lon,alt?} (WGS84 degrees)."
                 ),
                 inputSchema: {
@@ -113,14 +389,13 @@ export class McpCameraBehavior extends McpBehavior {
                     properties: {
                         uri: {
                             type: "string",
-                            description: this._buildToolPropertyDescription(McpCameraBehavior.CameraSetTargetFn, "uri", undefined, "Camera URI, e.g. babylon://camera/MyCamera"),
+                            description: this._resolvePropertyDescription(McpCameraBehavior.CameraSetTargetFn, "uri", "Camera URI, e.g. babylon://camera/MyCamera"),
                         },
                         target: {
                             ...coord,
-                            description: this._buildToolPropertyDescription(
+                            description: this._resolvePropertyDescription(
                                 McpCameraBehavior.CameraSetTargetFn,
                                 "target",
-                                undefined,
                                 "World-space look-at point. Cartesian {x,y,z} or geographic {lat,lon,alt?}."
                             ),
                         },
@@ -135,9 +410,8 @@ export class McpCameraBehavior extends McpBehavior {
             // -----------------------------------------------------------------
             {
                 name: McpCameraBehavior.CameraSetPositionFn,
-                description: this._buildToolDescription(
+                description: this._resolveToolDescription(
                     McpCameraBehavior.CameraSetPositionFn,
-                    undefined,
                     "Teleports the camera to an absolute world-space position. " +
                         "Accepts Cartesian {x,y,z} or geographic {lat,lon,alt?}. " +
                         "For ArcRotateCamera this recalculates alpha, beta and radius automatically."
@@ -145,13 +419,12 @@ export class McpCameraBehavior extends McpBehavior {
                 inputSchema: {
                     type: "object",
                     properties: {
-                        uri: { type: "string", description: this._buildToolPropertyDescription(McpCameraBehavior.CameraSetPositionFn, "uri", undefined, "Camera URI") },
+                        uri: { type: "string", description: this._resolvePropertyDescription(McpCameraBehavior.CameraSetPositionFn, "uri", "Camera URI") },
                         position: {
                             ...coord,
-                            description: this._buildToolPropertyDescription(
+                            description: this._resolvePropertyDescription(
                                 McpCameraBehavior.CameraSetPositionFn,
                                 "position",
-                                undefined,
                                 "New camera position. Cartesian {x,y,z} or geographic {lat,lon,alt?}."
                             ),
                         },
@@ -166,9 +439,8 @@ export class McpCameraBehavior extends McpBehavior {
             // -----------------------------------------------------------------
             {
                 name: McpCameraBehavior.CameraLookAtFn,
-                description: this._buildToolDescription(
+                description: this._resolveToolDescription(
                     McpCameraBehavior.CameraLookAtFn,
-                    undefined,
                     "Moves the camera to a world-space position AND sets its look-at target in a single call. " +
                         "Accepts Cartesian {x,y,z} or geographic {lat,lon,alt?} for both position and target. " +
                         "The ideal 'place the camera here and frame that subject' director operation."
@@ -176,22 +448,20 @@ export class McpCameraBehavior extends McpBehavior {
                 inputSchema: {
                     type: "object",
                     properties: {
-                        uri: { type: "string", description: this._buildToolPropertyDescription(McpCameraBehavior.CameraLookAtFn, "uri", undefined, "Camera URI") },
+                        uri: { type: "string", description: this._resolvePropertyDescription(McpCameraBehavior.CameraLookAtFn, "uri", "Camera URI") },
                         position: {
                             ...coord,
-                            description: this._buildToolPropertyDescription(
+                            description: this._resolvePropertyDescription(
                                 McpCameraBehavior.CameraLookAtFn,
                                 "position",
-                                undefined,
                                 "New camera position. Cartesian {x,y,z} or geographic {lat,lon,alt?}."
                             ),
                         },
                         target: {
                             ...coord,
-                            description: this._buildToolPropertyDescription(
+                            description: this._resolvePropertyDescription(
                                 McpCameraBehavior.CameraLookAtFn,
                                 "target",
-                                undefined,
                                 "World-space look-at point. Cartesian {x,y,z} or geographic {lat,lon,alt?}."
                             ),
                         },
@@ -206,9 +476,8 @@ export class McpCameraBehavior extends McpBehavior {
             // -----------------------------------------------------------------
             {
                 name: McpCameraBehavior.CameraOrbitFn,
-                description: this._buildToolDescription(
+                description: this._resolveToolDescription(
                     McpCameraBehavior.CameraOrbitFn,
-                    undefined,
                     "Rotates the camera around its current look-at target by incremental angles. " +
                         "deltaAlpha spins horizontally (azimuth); deltaBeta tilts vertically (elevation). " +
                         "For ArcRotateCamera this directly adjusts alpha/beta; " +
@@ -217,22 +486,20 @@ export class McpCameraBehavior extends McpBehavior {
                 inputSchema: {
                     type: "object",
                     properties: {
-                        uri: { type: "string", description: this._buildToolPropertyDescription(McpCameraBehavior.CameraOrbitFn, "uri", undefined, "Camera URI") },
+                        uri: { type: "string", description: this._resolvePropertyDescription(McpCameraBehavior.CameraOrbitFn, "uri", "Camera URI") },
                         deltaAlpha: {
                             type: "number",
-                            description: this._buildToolPropertyDescription(
+                            description: this._resolvePropertyDescription(
                                 McpCameraBehavior.CameraOrbitFn,
                                 "deltaAlpha",
-                                undefined,
                                 "Horizontal rotation delta in degrees. Positive = counter-clockwise when viewed from above."
                             ),
                         },
                         deltaBeta: {
                             type: "number",
-                            description: this._buildToolPropertyDescription(
+                            description: this._resolvePropertyDescription(
                                 McpCameraBehavior.CameraOrbitFn,
                                 "deltaBeta",
-                                undefined,
                                 "Vertical rotation delta in degrees. Positive = tilt down (toward ground)."
                             ),
                         },
@@ -247,9 +514,8 @@ export class McpCameraBehavior extends McpBehavior {
             // -----------------------------------------------------------------
             {
                 name: McpCameraBehavior.CameraSetFovFn,
-                description: this._buildToolDescription(
+                description: this._resolveToolDescription(
                     McpCameraBehavior.CameraSetFovFn,
-                    undefined,
                     "Sets the vertical field of view on a perspective camera. " +
                         "Low values (< 30°) give a telephoto / compressed look; " +
                         "high values (> 75°) give a wide-angle look. " +
@@ -258,15 +524,14 @@ export class McpCameraBehavior extends McpBehavior {
                 inputSchema: {
                     type: "object",
                     properties: {
-                        uri: { type: "string", description: this._buildToolPropertyDescription(McpCameraBehavior.CameraSetFovFn, "uri", undefined, "Camera URI") },
-                        fov: { type: "number", description: this._buildToolPropertyDescription(McpCameraBehavior.CameraSetFovFn, "fov", undefined, "Field-of-view value.") },
+                        uri: { type: "string", description: this._resolvePropertyDescription(McpCameraBehavior.CameraSetFovFn, "uri", "Camera URI") },
+                        fov: { type: "number", description: this._resolvePropertyDescription(McpCameraBehavior.CameraSetFovFn, "fov", "Field-of-view value.") },
                         unit: {
                             type: "string",
                             enum: ["deg", "rad"],
-                            description: this._buildToolPropertyDescription(
+                            description: this._resolvePropertyDescription(
                                 McpCameraBehavior.CameraSetFovFn,
                                 "unit",
-                                undefined,
                                 "Unit of the fov value. Defaults to 'deg' if omitted."
                             ),
                         },
@@ -281,9 +546,8 @@ export class McpCameraBehavior extends McpBehavior {
             // -----------------------------------------------------------------
             {
                 name: McpCameraBehavior.CameraZoomFn,
-                description: this._buildToolDescription(
+                description: this._resolveToolDescription(
                     McpCameraBehavior.CameraZoomFn,
-                    undefined,
                     "Applies a relative zoom. factor < 1 zooms in, factor > 1 zooms out. " +
                         "For perspective cameras this scales the FOV (lens zoom). " +
                         "For orthographic cameras it scales the frustum bounds. " +
@@ -292,13 +556,12 @@ export class McpCameraBehavior extends McpBehavior {
                 inputSchema: {
                     type: "object",
                     properties: {
-                        uri: { type: "string", description: this._buildToolPropertyDescription(McpCameraBehavior.CameraZoomFn, "uri", undefined, "Camera URI") },
+                        uri: { type: "string", description: this._resolvePropertyDescription(McpCameraBehavior.CameraZoomFn, "uri", "Camera URI") },
                         factor: {
                             type: "number",
-                            description: this._buildToolPropertyDescription(
+                            description: this._resolvePropertyDescription(
                                 McpCameraBehavior.CameraZoomFn,
                                 "factor",
-                                undefined,
                                 "Zoom multiplier. Must be > 0. factor < 1 zooms in, factor > 1 zooms out."
                             ),
                         },
@@ -313,31 +576,29 @@ export class McpCameraBehavior extends McpBehavior {
             // -----------------------------------------------------------------
             {
                 name: McpCameraBehavior.CameraSetProjectionFn,
-                description: this._buildToolDescription(McpCameraBehavior.CameraSetProjectionFn, undefined, "Switches the camera between perspective and orthographic projection."),
+                description: this._resolveToolDescription(McpCameraBehavior.CameraSetProjectionFn, "Switches the camera between perspective and orthographic projection."),
                 inputSchema: {
                     type: "object",
                     properties: {
-                        uri: { type: "string", description: this._buildToolPropertyDescription(McpCameraBehavior.CameraSetProjectionFn, "uri", undefined, "Camera URI") },
+                        uri: { type: "string", description: this._resolvePropertyDescription(McpCameraBehavior.CameraSetProjectionFn, "uri", "Camera URI") },
                         mode: {
                             type: "string",
                             enum: ["perspective", "orthographic"],
-                            description: this._buildToolPropertyDescription(McpCameraBehavior.CameraSetProjectionFn, "mode", undefined, "Target projection mode."),
+                            description: this._resolvePropertyDescription(McpCameraBehavior.CameraSetProjectionFn, "mode", "Target projection mode."),
                         },
                         fov: {
                             type: "number",
-                            description: this._buildToolPropertyDescription(
+                            description: this._resolvePropertyDescription(
                                 McpCameraBehavior.CameraSetProjectionFn,
                                 "fov",
-                                undefined,
                                 "Vertical FOV in degrees to apply when switching to perspective (optional)."
                             ),
                         },
                         orthoSize: {
                             type: "number",
-                            description: this._buildToolPropertyDescription(
+                            description: this._resolvePropertyDescription(
                                 McpCameraBehavior.CameraSetProjectionFn,
                                 "orthoSize",
-                                undefined,
                                 "Frustum height in world units when switching to orthographic (optional). Left/right bounds are derived from the viewport aspect ratio."
                             ),
                         },
@@ -352,9 +613,8 @@ export class McpCameraBehavior extends McpBehavior {
             // -----------------------------------------------------------------
             {
                 name: McpCameraBehavior.CameraDollyFn,
-                description: this._buildToolDescription(
+                description: this._resolveToolDescription(
                     McpCameraBehavior.CameraDollyFn,
-                    undefined,
                     "Physically moves the camera toward (+) or away from (-) its look-at target along the view axis. " +
                         "Unlike zoom this actually moves the camera, affecting depth-of-field and parallax. " +
                         "For ArcRotateCamera it adjusts the orbit radius."
@@ -362,13 +622,12 @@ export class McpCameraBehavior extends McpBehavior {
                 inputSchema: {
                     type: "object",
                     properties: {
-                        uri: { type: "string", description: this._buildToolPropertyDescription(McpCameraBehavior.CameraDollyFn, "uri", undefined, "Camera URI") },
+                        uri: { type: "string", description: this._resolvePropertyDescription(McpCameraBehavior.CameraDollyFn, "uri", "Camera URI") },
                         distance: {
                             type: "number",
-                            description: this._buildToolPropertyDescription(
+                            description: this._resolvePropertyDescription(
                                 McpCameraBehavior.CameraDollyFn,
                                 "distance",
-                                undefined,
                                 "World-unit distance to move. Positive = closer to target, negative = further away."
                             ),
                         },
@@ -383,9 +642,8 @@ export class McpCameraBehavior extends McpBehavior {
             // -----------------------------------------------------------------
             {
                 name: McpCameraBehavior.CameraPanFn,
-                description: this._buildToolDescription(
+                description: this._resolveToolDescription(
                     McpCameraBehavior.CameraPanFn,
-                    undefined,
                     "Slides the camera and its look-at target together perpendicular to the view axis. " +
                         "deltaX moves along the camera's right vector; deltaY along the camera's screen-up vector. " +
                         "This is a steady-cam pan: the subject stays framed at the same angle and distance."
@@ -393,22 +651,20 @@ export class McpCameraBehavior extends McpBehavior {
                 inputSchema: {
                     type: "object",
                     properties: {
-                        uri: { type: "string", description: this._buildToolPropertyDescription(McpCameraBehavior.CameraPanFn, "uri", undefined, "Camera URI") },
+                        uri: { type: "string", description: this._resolvePropertyDescription(McpCameraBehavior.CameraPanFn, "uri", "Camera URI") },
                         deltaX: {
                             type: "number",
-                            description: this._buildToolPropertyDescription(
+                            description: this._resolvePropertyDescription(
                                 McpCameraBehavior.CameraPanFn,
                                 "deltaX",
-                                undefined,
                                 "World-units to slide horizontally along the camera right vector. Positive = slide right."
                             ),
                         },
                         deltaY: {
                             type: "number",
-                            description: this._buildToolPropertyDescription(
+                            description: this._resolvePropertyDescription(
                                 McpCameraBehavior.CameraPanFn,
                                 "deltaY",
-                                undefined,
                                 "World-units to slide vertically along the camera up vector. Positive = slide up."
                             ),
                         },
@@ -423,15 +679,14 @@ export class McpCameraBehavior extends McpBehavior {
             // -----------------------------------------------------------------
             {
                 name: McpCameraBehavior.CameraLockFn,
-                description: this._buildToolDescription(
+                description: this._resolveToolDescription(
                     McpCameraBehavior.CameraLockFn,
-                    undefined,
                     "Detaches user input from the camera (cinematic lock). " + "Mouse, keyboard and touch events will no longer move the camera until camera.unlock is called."
                 ),
                 inputSchema: {
                     type: "object",
                     properties: {
-                        uri: { type: "string", description: this._buildToolPropertyDescription(McpCameraBehavior.CameraLockFn, "uri", undefined, "Camera URI") },
+                        uri: { type: "string", description: this._resolvePropertyDescription(McpCameraBehavior.CameraLockFn, "uri", "Camera URI") },
                     },
                     required: ["uri"],
                     additionalProperties: false,
@@ -443,15 +698,14 @@ export class McpCameraBehavior extends McpBehavior {
             // -----------------------------------------------------------------
             {
                 name: McpCameraBehavior.CameraUnlockFn,
-                description: this._buildToolDescription(
+                description: this._resolveToolDescription(
                     McpCameraBehavior.CameraUnlockFn,
-                    undefined,
                     "Re-attaches user input to the camera, restoring interactive control after a cinematic lock."
                 ),
                 inputSchema: {
                     type: "object",
                     properties: {
-                        uri: { type: "string", description: this._buildToolPropertyDescription(McpCameraBehavior.CameraUnlockFn, "uri", undefined, "Camera URI") },
+                        uri: { type: "string", description: this._resolvePropertyDescription(McpCameraBehavior.CameraUnlockFn, "uri", "Camera URI") },
                     },
                     required: ["uri"],
                     additionalProperties: false,
@@ -463,9 +717,8 @@ export class McpCameraBehavior extends McpBehavior {
             // -----------------------------------------------------------------
             {
                 name: McpCameraBehavior.CameraSnapshotFn,
-                description: this._buildToolDescription(
+                description: this._resolveToolDescription(
                     McpCameraBehavior.CameraSnapshotFn,
-                    undefined,
                     "Captures a screenshot from the camera's point of view and returns it as a base64-encoded PNG. " +
                         "Renders off-screen at any resolution, independent of the canvas size. " +
                         "Specify width + height for an explicit pixel resolution, or precision to scale relative to the current viewport (1.0 = native)."
@@ -473,40 +726,36 @@ export class McpCameraBehavior extends McpBehavior {
                 inputSchema: {
                     type: "object",
                     properties: {
-                        uri: { type: "string", description: this._buildToolPropertyDescription(McpCameraBehavior.CameraSnapshotFn, "uri", undefined, "Camera URI") },
+                        uri: { type: "string", description: this._resolvePropertyDescription(McpCameraBehavior.CameraSnapshotFn, "uri", "Camera URI") },
                         size: {
                             type: "object",
-                            description: this._buildToolPropertyDescription(
+                            description: this._resolvePropertyDescription(
                                 McpCameraBehavior.CameraSnapshotFn,
                                 "size",
-                                undefined,
                                 "Output image dimensions. Provide { width, height } for an explicit resolution (pixels), or { precision } to scale relative to the current viewport (1.0 = native resolution, 2.0 = double). Omit entirely to capture at native viewport resolution."
                             ),
                             properties: {
                                 width: {
                                     type: "number",
-                                    description: this._buildToolPropertyDescription(
+                                    description: this._resolvePropertyDescription(
                                         McpCameraBehavior.CameraSnapshotFn,
                                         "size.width",
-                                        undefined,
                                         "Output width in pixels. Must be accompanied by height."
                                     ),
                                 },
                                 height: {
                                     type: "number",
-                                    description: this._buildToolPropertyDescription(
+                                    description: this._resolvePropertyDescription(
                                         McpCameraBehavior.CameraSnapshotFn,
                                         "size.height",
-                                        undefined,
                                         "Output height in pixels. Must be accompanied by width."
                                     ),
                                 },
                                 precision: {
                                     type: "number",
-                                    description: this._buildToolPropertyDescription(
+                                    description: this._resolvePropertyDescription(
                                         McpCameraBehavior.CameraSnapshotFn,
                                         "size.precision",
-                                        undefined,
                                         "Scale factor relative to the current viewport size. Cannot be combined with width/height."
                                     ),
                                 },
@@ -524,9 +773,8 @@ export class McpCameraBehavior extends McpBehavior {
             // -----------------------------------------------------------------
             {
                 name: McpCameraBehavior.CameraAnimateToFn,
-                description: this._buildToolDescription(
+                description: this._resolveToolDescription(
                     McpCameraBehavior.CameraAnimateToFn,
-                    undefined,
                     "Smoothly animates the camera to a new position, look-at target and/or FOV over the given duration. " +
                         "All specified properties are interpolated simultaneously. " +
                         "Properties that are omitted remain unchanged."
@@ -534,46 +782,42 @@ export class McpCameraBehavior extends McpBehavior {
                 inputSchema: {
                     type: "object",
                     properties: {
-                        uri: { type: "string", description: this._buildToolPropertyDescription(McpCameraBehavior.CameraAnimateToFn, "uri", undefined, "Camera URI") },
+                        uri: { type: "string", description: this._resolvePropertyDescription(McpCameraBehavior.CameraAnimateToFn, "uri", "Camera URI") },
                         position: {
                             ...coord,
-                            description: this._buildToolPropertyDescription(
+                            description: this._resolvePropertyDescription(
                                 McpCameraBehavior.CameraAnimateToFn,
                                 "position",
-                                undefined,
                                 "Destination position. Cartesian {x,y,z} or geographic {lat,lon,alt?}. Omit to keep the current position."
                             ),
                         },
                         target: {
                             ...coord,
-                            description: this._buildToolPropertyDescription(
+                            description: this._resolvePropertyDescription(
                                 McpCameraBehavior.CameraAnimateToFn,
                                 "target",
-                                undefined,
                                 "Destination look-at point. Cartesian {x,y,z} or geographic {lat,lon,alt?}. Omit to keep the current target."
                             ),
                         },
                         fov: {
                             type: "number",
-                            description: this._buildToolPropertyDescription(
+                            description: this._resolvePropertyDescription(
                                 McpCameraBehavior.CameraAnimateToFn,
                                 "fov",
-                                undefined,
                                 "Destination vertical FOV in degrees. Only applies to perspective cameras. Omit to keep the current FOV."
                             ),
                         },
                         duration: {
                             type: "number",
-                            description: this._buildToolPropertyDescription(
+                            description: this._resolvePropertyDescription(
                                 McpCameraBehavior.CameraAnimateToFn,
                                 "duration",
-                                undefined,
                                 "Animation duration in seconds. Defaults to 1."
                             ),
                         },
                         easing: {
                             ...easingParam,
-                            description: this._buildToolPropertyDescription(McpCameraBehavior.CameraAnimateToFn, "easing", undefined, easingParam.description as string),
+                            description: this._resolvePropertyDescription(McpCameraBehavior.CameraAnimateToFn, "easing", easingParam.description as string),
                         },
                     },
                     required: ["uri"],
@@ -586,9 +830,8 @@ export class McpCameraBehavior extends McpBehavior {
             // -----------------------------------------------------------------
             {
                 name: McpCameraBehavior.CameraAnimateOrbitFn,
-                description: this._buildToolDescription(
+                description: this._resolveToolDescription(
                     McpCameraBehavior.CameraAnimateOrbitFn,
-                    undefined,
                     "Smoothly rotates the camera around its current look-at target. " +
                         "deltaAlpha sweeps the horizontal azimuth, deltaBeta tilts the elevation. " +
                         "Set loop:true for a continuous turntable at constant angular velocity " +
@@ -597,46 +840,42 @@ export class McpCameraBehavior extends McpBehavior {
                 inputSchema: {
                     type: "object",
                     properties: {
-                        uri: { type: "string", description: this._buildToolPropertyDescription(McpCameraBehavior.CameraAnimateOrbitFn, "uri", undefined, "Camera URI") },
+                        uri: { type: "string", description: this._resolvePropertyDescription(McpCameraBehavior.CameraAnimateOrbitFn, "uri", "Camera URI") },
                         deltaAlpha: {
                             type: "number",
-                            description: this._buildToolPropertyDescription(
+                            description: this._resolvePropertyDescription(
                                 McpCameraBehavior.CameraAnimateOrbitFn,
                                 "deltaAlpha",
-                                undefined,
                                 "Total horizontal rotation in degrees over one duration. Positive = counter-clockwise viewed from above."
                             ),
                         },
                         deltaBeta: {
                             type: "number",
-                            description: this._buildToolPropertyDescription(
+                            description: this._resolvePropertyDescription(
                                 McpCameraBehavior.CameraAnimateOrbitFn,
                                 "deltaBeta",
-                                undefined,
                                 "Total vertical rotation in degrees over one duration. Positive = tilt down toward ground."
                             ),
                         },
                         duration: {
                             type: "number",
-                            description: this._buildToolPropertyDescription(
+                            description: this._resolvePropertyDescription(
                                 McpCameraBehavior.CameraAnimateOrbitFn,
                                 "duration",
-                                undefined,
                                 "Duration in seconds for one full sweep. Defaults to 2."
                             ),
                         },
                         loop: {
                             type: "boolean",
-                            description: this._buildToolPropertyDescription(
+                            description: this._resolvePropertyDescription(
                                 McpCameraBehavior.CameraAnimateOrbitFn,
                                 "loop",
-                                undefined,
                                 "If true, rotates continuously at constant speed until camera.stopAnimation is called."
                             ),
                         },
                         easing: {
                             ...easingParam,
-                            description: this._buildToolPropertyDescription(McpCameraBehavior.CameraAnimateOrbitFn, "easing", undefined, easingParam.description as string),
+                            description: this._resolvePropertyDescription(McpCameraBehavior.CameraAnimateOrbitFn, "easing", easingParam.description as string),
                         },
                     },
                     required: ["uri"],
@@ -649,9 +888,8 @@ export class McpCameraBehavior extends McpBehavior {
             // -----------------------------------------------------------------
             {
                 name: McpCameraBehavior.CameraFollowPathFn,
-                description: this._buildToolDescription(
+                description: this._resolveToolDescription(
                     McpCameraBehavior.CameraFollowPathFn,
-                    undefined,
                     "Moves the camera through an ordered sequence of world-space waypoints over the given duration. " +
                         "Position and look-at target are linearly interpolated between adjacent waypoints. " +
                         "If a waypoint omits position or target, that value carries forward from the previous waypoint."
@@ -659,13 +897,12 @@ export class McpCameraBehavior extends McpBehavior {
                 inputSchema: {
                     type: "object",
                     properties: {
-                        uri: { type: "string", description: this._buildToolPropertyDescription(McpCameraBehavior.CameraFollowPathFn, "uri", undefined, "Camera URI") },
+                        uri: { type: "string", description: this._resolvePropertyDescription(McpCameraBehavior.CameraFollowPathFn, "uri", "Camera URI") },
                         waypoints: {
                             type: "array",
-                            description: this._buildToolPropertyDescription(
+                            description: this._resolvePropertyDescription(
                                 McpCameraBehavior.CameraFollowPathFn,
                                 "waypoints",
-                                undefined,
                                 "Ordered list of camera waypoints. At least 2 required."
                             ),
                             minItems: 2,
@@ -674,19 +911,17 @@ export class McpCameraBehavior extends McpBehavior {
                                 properties: {
                                     position: {
                                         ...coord,
-                                        description: this._buildToolPropertyDescription(
+                                        description: this._resolvePropertyDescription(
                                             McpCameraBehavior.CameraFollowPathFn,
                                             "waypoints.position",
-                                            undefined,
                                             "Camera position at this waypoint. Cartesian {x,y,z} or geographic {lat,lon,alt?}. Omit to carry forward from the previous waypoint."
                                         ),
                                     },
                                     target: {
                                         ...coord,
-                                        description: this._buildToolPropertyDescription(
+                                        description: this._resolvePropertyDescription(
                                             McpCameraBehavior.CameraFollowPathFn,
                                             "waypoints.target",
-                                            undefined,
                                             "Look-at point at this waypoint. Cartesian {x,y,z} or geographic {lat,lon,alt?}. Omit to carry forward from the previous waypoint."
                                         ),
                                     },
@@ -696,16 +931,15 @@ export class McpCameraBehavior extends McpBehavior {
                         },
                         duration: {
                             type: "number",
-                            description: this._buildToolPropertyDescription(
+                            description: this._resolvePropertyDescription(
                                 McpCameraBehavior.CameraFollowPathFn,
                                 "duration",
-                                undefined,
                                 "Total flight duration in seconds. Defaults to 3."
                             ),
                         },
                         easing: {
                             ...easingParam,
-                            description: this._buildToolPropertyDescription(McpCameraBehavior.CameraFollowPathFn, "easing", undefined, easingParam.description as string),
+                            description: this._resolvePropertyDescription(McpCameraBehavior.CameraFollowPathFn, "easing", easingParam.description as string),
                         },
                     },
                     required: ["uri", "waypoints"],
@@ -718,9 +952,8 @@ export class McpCameraBehavior extends McpBehavior {
             // -----------------------------------------------------------------
             {
                 name: McpCameraBehavior.CameraShakeFn,
-                description: this._buildToolDescription(
+                description: this._resolveToolDescription(
                     McpCameraBehavior.CameraShakeFn,
-                    undefined,
                     "Applies a procedural trauma shake to the camera for the given duration. " +
                         "The effect oscillates the look-at target with layered sinusoids whose amplitude decays to zero by the end. " +
                         "The camera automatically returns to its original look-at point when the shake completes."
@@ -728,26 +961,24 @@ export class McpCameraBehavior extends McpBehavior {
                 inputSchema: {
                     type: "object",
                     properties: {
-                        uri: { type: "string", description: this._buildToolPropertyDescription(McpCameraBehavior.CameraShakeFn, "uri", undefined, "Camera URI") },
+                        uri: { type: "string", description: this._resolvePropertyDescription(McpCameraBehavior.CameraShakeFn, "uri", "Camera URI") },
                         intensity: {
                             type: "number",
-                            description: this._buildToolPropertyDescription(
+                            description: this._resolvePropertyDescription(
                                 McpCameraBehavior.CameraShakeFn,
                                 "intensity",
-                                undefined,
                                 "Peak shake amplitude in world units. Defaults to 0.5."
                             ),
                         },
                         duration: {
                             type: "number",
-                            description: this._buildToolPropertyDescription(McpCameraBehavior.CameraShakeFn, "duration", undefined, "Shake duration in seconds. Defaults to 1."),
+                            description: this._resolvePropertyDescription(McpCameraBehavior.CameraShakeFn, "duration", "Shake duration in seconds. Defaults to 1."),
                         },
                         frequency: {
                             type: "number",
-                            description: this._buildToolPropertyDescription(
+                            description: this._resolvePropertyDescription(
                                 McpCameraBehavior.CameraShakeFn,
                                 "frequency",
-                                undefined,
                                 "Base oscillation frequency in Hz. Defaults to 12."
                             ),
                         },
@@ -762,15 +993,14 @@ export class McpCameraBehavior extends McpBehavior {
             // -----------------------------------------------------------------
             {
                 name: McpCameraBehavior.CameraStopAnimationFn,
-                description: this._buildToolDescription(
+                description: this._resolveToolDescription(
                     McpCameraBehavior.CameraStopAnimationFn,
-                    undefined,
                     "Stops any currently running animation on the camera (animateTo, animateOrbit, followPath, shake), leaving it at its current interpolated state."
                 ),
                 inputSchema: {
                     type: "object",
                     properties: {
-                        uri: { type: "string", description: this._buildToolPropertyDescription(McpCameraBehavior.CameraStopAnimationFn, "uri", undefined, "Camera URI") },
+                        uri: { type: "string", description: this._resolvePropertyDescription(McpCameraBehavior.CameraStopAnimationFn, "uri", "Camera URI") },
                     },
                     required: ["uri"],
                     additionalProperties: false,
@@ -782,9 +1012,8 @@ export class McpCameraBehavior extends McpBehavior {
             // -----------------------------------------------------------------
             {
                 name: McpCameraBehavior.SceneVisibleObjectsFn,
-                description: this._buildToolDescription(
+                description: this._resolveToolDescription(
                     McpCameraBehavior.SceneVisibleObjectsFn,
-                    undefined,
                     "Returns a structured list of all scene meshes currently visible from a camera. " +
                         "Use this instead of camera_snapshot to understand what the camera sees — no image required. " +
                         "Each entry includes position, bounding box, material color and flags, filtered to the frustum. " +
@@ -795,28 +1024,25 @@ export class McpCameraBehavior extends McpBehavior {
                     properties: {
                         uri: {
                             type: "string",
-                            description: this._buildToolPropertyDescription(
+                            description: this._resolvePropertyDescription(
                                 McpCameraBehavior.SceneVisibleObjectsFn,
                                 "uri",
-                                undefined,
                                 "Camera URI, e.g. babylon://camera/MyCamera"
                             ),
                         },
                         maxObjects: {
                             type: "number",
-                            description: this._buildToolPropertyDescription(
+                            description: this._resolvePropertyDescription(
                                 McpCameraBehavior.SceneVisibleObjectsFn,
                                 "maxObjects",
-                                undefined,
                                 "Maximum number of objects to return. Defaults to 50."
                             ),
                         },
                         include: {
                             type: "array",
-                            description: this._buildToolPropertyDescription(
+                            description: this._resolvePropertyDescription(
                                 McpCameraBehavior.SceneVisibleObjectsFn,
                                 "include",
-                                undefined,
                                 "Fields to include in each object entry. Omit or leave empty for all fields. Valid values: transform, bounds, material, color, visibility, tags."
                             ),
                             items: {
@@ -826,38 +1052,34 @@ export class McpCameraBehavior extends McpBehavior {
                         },
                         onlyPickable: {
                             type: "boolean",
-                            description: this._buildToolPropertyDescription(
+                            description: this._resolvePropertyDescription(
                                 McpCameraBehavior.SceneVisibleObjectsFn,
                                 "onlyPickable",
-                                undefined,
                                 "If true, only include meshes that are pickable. Defaults to false."
                             ),
                         },
                         minScreenCoverage: {
                             type: "number",
-                            description: this._buildToolPropertyDescription(
+                            description: this._resolvePropertyDescription(
                                 McpCameraBehavior.SceneVisibleObjectsFn,
                                 "minScreenCoverage",
-                                undefined,
                                 "Minimum fraction of screen area (0..1) the mesh bounding box must cover to be included. Defaults to 0.001."
                             ),
                         },
                         layerMask: {
                             type: "number",
-                            description: this._buildToolPropertyDescription(
+                            description: this._resolvePropertyDescription(
                                 McpCameraBehavior.SceneVisibleObjectsFn,
                                 "layerMask",
-                                undefined,
                                 "Optional layer mask filter. Only meshes whose layerMask shares at least one bit are included."
                             ),
                         },
                         sortBy: {
                             type: "string",
                             enum: ["distance", "screenCoverage", "name"],
-                            description: this._buildToolPropertyDescription(
+                            description: this._resolvePropertyDescription(
                                 McpCameraBehavior.SceneVisibleObjectsFn,
                                 "sortBy",
-                                undefined,
                                 "Sort order for the visible list. Defaults to 'distance' (closest first)."
                             ),
                         },
@@ -872,9 +1094,8 @@ export class McpCameraBehavior extends McpBehavior {
             // -----------------------------------------------------------------
             {
                 name: McpCameraBehavior.ScenePickFromCenterFn,
-                description: this._buildToolDescription(
+                description: this._resolveToolDescription(
                     McpCameraBehavior.ScenePickFromCenterFn,
-                    undefined,
                     "Casts a ray from the camera through a normalized screen point and returns the first mesh hit. " +
                         "Useful for answering 'what am I looking at?' — defaults to the screen center (crosshair pick). " +
                         "Returns the hit mesh, world-space impact point, surface normal, and distance."
@@ -884,37 +1105,33 @@ export class McpCameraBehavior extends McpBehavior {
                     properties: {
                         uri: {
                             type: "string",
-                            description: this._buildToolPropertyDescription(
+                            description: this._resolvePropertyDescription(
                                 McpCameraBehavior.ScenePickFromCenterFn,
                                 "uri",
-                                undefined,
                                 "Camera URI, e.g. babylon://camera/MyCamera"
                             ),
                         },
                         screenPoint: {
                             type: "object",
-                            description: this._buildToolPropertyDescription(
+                            description: this._resolvePropertyDescription(
                                 McpCameraBehavior.ScenePickFromCenterFn,
                                 "screenPoint",
-                                undefined,
                                 "Normalized screen position to cast from. Defaults to center (0.5, 0.5)."
                             ),
                             properties: {
                                 x: {
                                     type: "number",
-                                    description: this._buildToolPropertyDescription(
+                                    description: this._resolvePropertyDescription(
                                         McpCameraBehavior.ScenePickFromCenterFn,
                                         "screenPoint.x",
-                                        undefined,
                                         "Horizontal position (0 = left edge, 1 = right edge)."
                                     ),
                                 },
                                 y: {
                                     type: "number",
-                                    description: this._buildToolPropertyDescription(
+                                    description: this._resolvePropertyDescription(
                                         McpCameraBehavior.ScenePickFromCenterFn,
                                         "screenPoint.y",
-                                        undefined,
                                         "Vertical position (0 = top edge, 1 = bottom edge)."
                                     ),
                                 },
@@ -924,19 +1141,17 @@ export class McpCameraBehavior extends McpBehavior {
                         },
                         maxDistance: {
                             type: "number",
-                            description: this._buildToolPropertyDescription(
+                            description: this._resolvePropertyDescription(
                                 McpCameraBehavior.ScenePickFromCenterFn,
                                 "maxDistance",
-                                undefined,
                                 "Maximum ray distance in world units. Defaults to unlimited."
                             ),
                         },
                         allHits: {
                             type: "boolean",
-                            description: this._buildToolPropertyDescription(
+                            description: this._resolvePropertyDescription(
                                 McpCameraBehavior.ScenePickFromCenterFn,
                                 "allHits",
-                                undefined,
                                 "If true, returns all meshes intersected by the ray (including those behind the first hit), sorted by distance in the hits array. Useful when objects are stacked or partially occluded. Defaults to false (closest hit only)."
                             ),
                         },

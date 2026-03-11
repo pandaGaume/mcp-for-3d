@@ -1,5 +1,6 @@
 import { IEventSource } from "./eventSource";
 import { McpResource, McpResourceContent, McpResourceTemplate, McpTool } from "./mcp.core.interfaces";
+import { McpGrammar } from "../mcp.grammar";
 
 // ── Tool Support ─────────────────────────────────────────────────────────────
 
@@ -123,36 +124,20 @@ export interface IMcpBehaviorAdapter extends IMcpRuntimeOperations {
     getToolSupport?(toolName: string, resourceType?: string): ToolSupport | undefined;
 
     /**
-     * Returns an adapter-specific description for a tool, optionally scoped
-     * to a resource type.
+     * Adapter-specific grammar overrides.  The behaviour merges this grammar
+     * on top of its own defaults when building tool schemas.
      *
-     * The behavior calls this while building tool schemas so that adapters
-     * can inject engine-specific language into the tool-level description.
-     *
-     * @param toolName     The tool name, e.g. `"camera_set_target"`.
-     * @param resourceType Optional resource type string chosen by the adapter.
-     * @returns A replacement description string, or `undefined` to keep the
-     *          default description provided by the behavior.
+     * Adapters that need dynamic grammar (e.g. Babylon camera with optional
+     * geodetic system) should rebuild this grammar when config changes and
+     * signal the behaviour via {@link onGrammarChanged}.
      */
-    getToolDescription?(toolName: string, resourceType?: string): string | undefined;
+    grammar?: McpGrammar;
 
     /**
-     * Returns an adapter-specific description for a tool property, optionally
-     * scoped to a resource type.
-     *
-     * The behavior calls this while building tool schemas so that adapters
-     * can inject engine-specific language (e.g. "ECEF metres" for Cesium,
-     * "right-handed y-up" for Babylon) into individual JSON-Schema property
-     * descriptions.
-     *
-     * @param toolName      The tool name, e.g. `"camera_set_target"`.
-     * @param propertyName  Dot-notation path into the inputSchema properties,
-     *                      e.g. `"target"`, `"position"`, `"patch.intensity"`.
-     * @param resourceType  Optional resource type string chosen by the adapter.
-     * @returns A replacement description string, or `undefined` to keep the
-     *          default description provided by the behavior.
+     * Fires when the adapter's grammar has been rebuilt.
+     * The behaviour listens to this in order to invalidate its tools cache.
      */
-    getToolPropertyDescription?(toolName: string, propertyName: string, resourceType?: string): string | undefined;
+    onGrammarChanged?: IEventSource<void>;
 }
 
 /**

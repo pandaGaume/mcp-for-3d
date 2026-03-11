@@ -4,3 +4,4 @@ export * from "./mcp.behaviorBase";
 export * from "./mcp.behavior";
 export * from "./mcp.toolResult";
 export * from "./mcp.adapter";
+export * from "./mcp.grammar";

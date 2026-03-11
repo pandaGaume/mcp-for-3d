@@ -1,9 +1,12 @@
 import { createEventEmitter, IEventEmitter, IEventSource, IMcpBehaviorAdapter, McpResourceContent, McpToolResult, ToolSupport } from "./interfaces";
+import { McpGrammar } from "./mcp.grammar";
 
 export abstract class McpAdapterBase implements IMcpBehaviorAdapter {
     private _domain: string;
     private _onResourceContentChanged?: IEventEmitter<string>;
     private _onResourcesChanged?: IEventEmitter<void>;
+    private _onGrammarChanged?: IEventEmitter<void>;
+    private _grammar?: McpGrammar;
 
     constructor(domain: string) {
         this._domain = domain;
@@ -12,6 +15,29 @@ export abstract class McpAdapterBase implements IMcpBehaviorAdapter {
     public get domain(): string {
         return this._domain;
     }
+
+    // ── Grammar ──────────────────────────────────────────────────────────────
+
+    public get grammar(): McpGrammar | undefined {
+        return this._grammar;
+    }
+
+    public set grammar(value: McpGrammar | undefined) {
+        this._grammar = value;
+    }
+
+    public get onGrammarChanged(): IEventSource<void> {
+        if (!this._onGrammarChanged) {
+            this._onGrammarChanged = createEventEmitter<void>();
+        }
+        return this._onGrammarChanged;
+    }
+
+    protected _emitGrammarChanged(): void {
+        this._onGrammarChanged?.emit();
+    }
+
+    // ── Resource events ──────────────────────────────────────────────────────
 
     public get onResourceContentChanged(): IEventSource<string> {
         if (!this._onResourceContentChanged) {
@@ -27,20 +53,7 @@ export abstract class McpAdapterBase implements IMcpBehaviorAdapter {
         return this._onResourcesChanged;
     }
 
-    public dispose(): void {
-        this._onResourceContentChanged?.clear();
-        this._onResourceContentChanged = undefined;
-        this._onResourcesChanged?.clear();
-        this._onResourcesChanged = undefined;
-    }
-
-    protected _forwardResourceChanged() {
-        this._onResourcesChanged?.emit();
-    }
-
-    protected _forwardResourceContentChanged(uri: string) {
-        this._onResourceContentChanged?.emit(uri);
-    }
+    // ── Tool support ─────────────────────────────────────────────────────────
 
     /**
      * Returns the support level for a tool, optionally scoped to a resource type.
@@ -53,27 +66,23 @@ export abstract class McpAdapterBase implements IMcpBehaviorAdapter {
         return undefined;
     }
 
-    /**
-     * Returns an adapter-specific description for a tool.
-     *
-     * Override in subclasses to inject engine-specific language into
-     * tool-level descriptions. The default returns `undefined` for every
-     * tool, which the behavior interprets as "use the default description".
-     */
-    getToolDescription?(_toolName: string, _resourceType?: string): string | undefined {
-        return undefined;
+    // ── Lifecycle ────────────────────────────────────────────────────────────
+
+    public dispose(): void {
+        this._onResourceContentChanged?.clear();
+        this._onResourceContentChanged = undefined;
+        this._onResourcesChanged?.clear();
+        this._onResourcesChanged = undefined;
+        this._onGrammarChanged?.clear();
+        this._onGrammarChanged = undefined;
     }
 
-    /**
-     * Returns an adapter-specific description for a tool property.
-     *
-     * Override in subclasses to inject engine-specific coordinate grammar
-     * into individual tool property descriptions. The default returns
-     * `undefined` for every property, which the behavior interprets as
-     * "use the default description".
-     */
-    getToolPropertyDescription?(_toolName: string, _propertyName: string, _resourceType?: string): string | undefined {
-        return undefined;
+    protected _forwardResourceChanged() {
+        this._onResourcesChanged?.emit();
+    }
+
+    protected _forwardResourceContentChanged(uri: string) {
+        this._onResourceContentChanged?.emit(uri);
     }
 
     public abstract readResourceAsync(uri: string): Promise<McpResourceContent | undefined>;
