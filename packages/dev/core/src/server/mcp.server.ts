@@ -1,4 +1,4 @@
-import type { IMcpBehavior, IMcpInitializer, IMcpRuntimeOperations, IMcpServer, IMcpServerHandlers, IMcpServerOptions, McpGrammarResolver } from "../interfaces";
+import type { IMessageTransport, IMcpBehavior, IMcpInitializer, IMcpRuntimeOperations, IMcpServer, IMcpServerHandlers, IMcpServerOptions, McpGrammarResolver } from "../interfaces";
 import type {
     JsonRpcNotification,
     JsonRpcRequest,
@@ -11,6 +11,8 @@ import type {
     McpTool,
 } from "../interfaces";
 import { McpGrammar } from "../mcp.grammar";
+import { DirectTransport } from "./direct.transport";
+import { MultiplexTransport } from "./multiplex.transport";
 import { Mcp } from "./jsonrpc.helpers";
 
 /**
@@ -23,8 +25,8 @@ import { Mcp } from "./jsonrpc.helpers";
  *
  * Lifecycle:
  * ```
- * start() → WebSocket opens → receives messages → dispatches to handlers
- * stop()  → WebSocket closes, reconnection cancelled
+ * start() → transport opens → receives messages → dispatches to handlers
+ * stop()  → transport closes, reconnection cancelled
  * ```
  */
 export class McpServer implements IMcpServer, IMcpServerHandlers {
@@ -39,7 +41,14 @@ export class McpServer implements IMcpServer, IMcpServerHandlers {
      */
     private readonly _handlers: IMcpServerHandlers;
 
-    private _ws: WebSocket | null = null;
+    /**
+     * An externally-provided transport (e.g. {@link MultiplexTransport}).
+     * When set, `_connect()` reuses it instead of creating a {@link DirectTransport}.
+     * Reconnection is delegated to the external transport itself.
+     */
+    private readonly _externalTransport: IMessageTransport | undefined;
+
+    private _transport: IMessageTransport | null = null;
     private _isRunning = false;
 
     /** Set to true by {@link stop} to prevent reconnection after an explicit close. */
@@ -84,6 +93,7 @@ export class McpServer implements IMcpServer, IMcpServerHandlers {
         handlers?: IMcpServerHandlers,
         grammars?: Map<string, McpGrammar>,
         grammarResolver?: McpGrammarResolver,
+        transport?: IMessageTransport,
     ) {
         this._name = name;
         this._wsUrl = wsUrl;
@@ -93,6 +103,7 @@ export class McpServer implements IMcpServer, IMcpServerHandlers {
         this._handlers = handlers ?? this;
         this._grammars = grammars ?? new Map();
         this._grammarResolver = grammarResolver;
+        this._externalTransport = transport;
     }
 
     // -------------------------------------------------------------------------
@@ -134,8 +145,8 @@ export class McpServer implements IMcpServer, IMcpServerHandlers {
     async stop(): Promise<void> {
         this._stopped = true;
         this._clearIdleTimer();
-        this._ws?.close();
-        this._ws = null;
+        this._transport?.close();
+        this._transport = null;
         this._isRunning = false;
     }
 
@@ -366,47 +377,60 @@ export class McpServer implements IMcpServer, IMcpServerHandlers {
     }
 
     // -------------------------------------------------------------------------
-    // WebSocket connection management
+    // Transport connection management
     // -------------------------------------------------------------------------
 
     /**
-     * Opens a new WebSocket connection and wires up all event handlers.
+     * Opens the transport and wires up all event handlers.
      * Called by {@link start} and scheduled again by {@link _scheduleReconnect}.
+     *
+     * When an external transport was provided (e.g. {@link MultiplexTransport}),
+     * it is reused as-is. Otherwise a fresh {@link DirectTransport} is created
+     * for each connection attempt.
      */
     private _connect(): Promise<void> {
         return new Promise((resolve, reject) => {
-            const ws = new WebSocket(this._wsUrl);
+            const transport = this._externalTransport ?? new DirectTransport(this._wsUrl);
 
-            ws.onopen = () => {
-                this._ws = ws;
+            transport.onOpen = () => {
+                this._transport = transport;
                 this._isRunning = true;
                 this._reconnectAttempts = 0; // reset back-off counter on success
                 resolve();
             };
 
-            ws.onerror = () => {
-                // Only reject the initial promise; subsequent errors are handled via onclose.
+            transport.onError = () => {
+                // Only reject the initial promise; subsequent errors are handled via onClose.
                 if (!this._isRunning) {
                     reject(new Error(`McpServer: could not connect to ${this._wsUrl}`));
                 }
             };
 
-            ws.onclose = () => this._onDisconnect();
+            transport.onClose = () => this._onDisconnect();
 
-            ws.onmessage = (event: MessageEvent<string>) => {
+            transport.onMessage = (data: string) => {
                 this._resetIdleTimer();
-                void this._handleMessage(event.data);
+                void this._handleMessage(data);
             };
+
+            // DirectTransport requires an explicit connect().
+            // MultiplexTransport requires activate() to register with the shared socket.
+            if (transport instanceof DirectTransport) {
+                transport.connect();
+            } else if (transport instanceof MultiplexTransport) {
+                transport.activate();
+            }
         });
     }
 
     /**
-     * Called whenever the WebSocket closes (cleanly or not).
+     * Called whenever the transport closes (cleanly or not).
      * Triggers reconnection unless {@link stop} was called explicitly.
+     * When an external transport is in use, reconnection is delegated to it.
      */
     private _onDisconnect(): void {
         this._isRunning = false;
-        this._ws = null;
+        this._transport = null;
         this._sessionReady = false; // handshake must be repeated on reconnection
         this._sessionGrammar = undefined; // grammar must be re-resolved on reconnection
         this._clearIdleTimer();
@@ -425,6 +449,9 @@ export class McpServer implements IMcpServer, IMcpServerHandlers {
      * Gives up silently once `maxAttempts` is reached (if configured).
      */
     private _scheduleReconnect(): void {
+        // External transports (e.g. MultiplexTransport) manage their own reconnection.
+        if (this._externalTransport) return;
+
         const policy = this._options.reconnect;
         // No reconnect policy means no automatic reconnection.
         if (!policy) return;
@@ -521,7 +548,7 @@ export class McpServer implements IMcpServer, IMcpServerHandlers {
         if (!this._options.idleTimeoutMs) return;
         this._clearIdleTimer();
         this._idleTimer = setTimeout(() => {
-            this._ws?.close();
+            this._transport?.close();
         }, this._options.idleTimeoutMs);
     }
 
@@ -546,12 +573,12 @@ export class McpServer implements IMcpServer, IMcpServerHandlers {
     }
 
     /**
-     * Serializes and sends a JSON-RPC notification over the WebSocket, if open.
+     * Serializes and sends a JSON-RPC notification over the transport, if open.
      * Unlike {@link _send}, this accepts a notification (no `id`) rather than a response.
      */
     private _sendNotification(notification: { jsonrpc: "2.0"; method: string; params?: unknown }): void {
-        if (this._ws?.readyState === WebSocket.OPEN) {
-            this._ws.send(JSON.stringify(notification));
+        if (this._transport?.isOpen) {
+            this._transport.send(JSON.stringify(notification));
         }
     }
 
@@ -599,10 +626,10 @@ export class McpServer implements IMcpServer, IMcpServerHandlers {
         }
     }
 
-    /** Sends a serialized JSON-RPC response over the WebSocket, if open. */
+    /** Sends a serialized JSON-RPC response over the transport, if open. */
     private _send(response: JsonRpcResponse): void {
-        if (this._ws?.readyState === WebSocket.OPEN) {
-            this._ws.send(JSON.stringify(response));
+        if (this._transport?.isOpen) {
+            this._transport.send(JSON.stringify(response));
         }
     }
 }

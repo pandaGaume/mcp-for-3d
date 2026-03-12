@@ -1,5 +1,6 @@
 import type { IMcpServerHandlers, McpClientCapabilities, McpClientInfo, McpServerIdentity } from "./mcp.core.interfaces";
 import type { IMcpBehavior } from "./mcp.behavior.interfaces";
+import type { IMessageTransport } from "./mcp.transport.interfaces";
 import type { McpGrammar } from "../mcp.grammar";
 
 /**
@@ -128,6 +129,12 @@ export interface IMcpServerBuilder {
      * The returned key is looked up in the grammars registered via {@link withGrammar}.
      */
     withGrammarResolver(resolver: McpGrammarResolver): IMcpServerBuilder;
+
+    /**
+     * Provides an external transport (e.g. {@link MultiplexTransport}) instead
+     * of the default {@link DirectTransport}. When set, `withWsUrl()` is optional.
+     */
+    withTransport(transport: IMessageTransport): IMcpServerBuilder;
 
     build(): IMcpServer;
 }

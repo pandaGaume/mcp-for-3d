@@ -85,8 +85,8 @@ export class McpMeshAdapter extends McpAdapterBase {
         let text: string | undefined;
 
         if (uri === McpMeshResourceUriPrefix) {
-            const meshes = this._scene.meshes.map((m) => ({
-                uri: this._buildUriForMesh(m),
+            const meshes = Array.from(this._indexedMeshes.entries()).map(([meshUri, m]) => ({
+                uri: meshUri,
                 id: m.id,
                 name: m.name,
                 type: m instanceof InstancedMesh ? "instancedMesh" : "mesh",
@@ -299,7 +299,12 @@ export class McpMeshAdapter extends McpAdapterBase {
     // -------------------------------------------------------------------------
 
     protected _initializeMeshIndex(): void {
-        this._scene.meshes.forEach((m) => this._indexedMeshes.set(this._buildUriForMesh(m), m));
+        this._scene.meshes.forEach((m) => {
+            const uri = this._buildUriForMesh(m);
+            if (this._isResourceAccepted(uri)) {
+                this._indexedMeshes.set(uri, m);
+            }
+        });
     }
 
     protected _buildUriForMesh(mesh: AbstractMesh): string {
@@ -307,7 +312,9 @@ export class McpMeshAdapter extends McpAdapterBase {
     }
 
     protected _onMeshAdded(mesh: AbstractMesh, _state: EventState): void {
-        this._indexedMeshes.set(this._buildUriForMesh(mesh), mesh);
+        const uri = this._buildUriForMesh(mesh);
+        if (!this._isResourceAccepted(uri)) return;
+        this._indexedMeshes.set(uri, mesh);
         this._forwardResourceChanged();
     }
 

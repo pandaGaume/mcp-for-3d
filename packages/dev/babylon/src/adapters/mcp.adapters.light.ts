@@ -83,8 +83,8 @@ export class McpLightAdapter extends McpAdapterBase {
         let text: string | undefined;
 
         if (uri === McpLightResourceUriPrefix) {
-            const lights = this._scene.lights.map((l) => ({
-                uri: this._buildUriForLight(l),
+            const lights = Array.from(this._indexedLights.entries()).map(([lightUri, l]) => ({
+                uri: lightUri,
                 id: l.id,
                 name: l.name,
                 type: this._getLightType(l),
@@ -564,7 +564,10 @@ export class McpLightAdapter extends McpAdapterBase {
     /** Populates the URI→Light index from the lights already present in the scene. */
     private _initializeLightIndex(): void {
         this._scene.lights.forEach((light) => {
-            this._indexedLights.set(this._buildUriForLight(light), light);
+            const uri = this._buildUriForLight(light);
+            if (this._isResourceAccepted(uri)) {
+                this._indexedLights.set(uri, light);
+            }
         });
     }
 
@@ -585,6 +588,7 @@ export class McpLightAdapter extends McpAdapterBase {
     /** Called when a new light is added to the scene. */
     private _onLightAdded(eventData: Light, _eventState: EventState): void {
         const uri = this._buildUriForLight(eventData);
+        if (!this._isResourceAccepted(uri)) return;
         this._indexedLights.set(uri, eventData);
         this._forwardResourceChanged();
     }

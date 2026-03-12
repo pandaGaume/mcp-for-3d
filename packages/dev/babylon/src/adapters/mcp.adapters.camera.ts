@@ -93,13 +93,17 @@ export class McpCameraAdapter extends McpAdapterBase {
     private _scene: Scene;
     private _indexedCameras = new Map<string, Camera>();
     private _observers: Nullable<Observer<Camera>>[] = [];
+    private readonly _cameraFilter: Set<Camera> | undefined;
 
     /** Tracks per-camera active animation observers so they can be cancelled on demand. */
     private _activeAnimations = new Map<string, Observer<Scene>>();
 
-    public constructor(scene?: Scene) {
+    public constructor(scene?: Scene, cameras?: Camera | Camera[]) {
         super(McpBabylonDomain);
         this._scene = scene ?? Engine.LastCreatedScene!;
+        if (cameras) {
+            this._cameraFilter = new Set(Array.isArray(cameras) ? cameras : [cameras]);
+        }
         if (!this._scene) {
             throw new Error("McpCameraAdapter requires a Babylon.js Scene. Provide one in the constructor or ensure Engine.LastCreatedScene is set.");
         }
@@ -120,9 +124,9 @@ export class McpCameraAdapter extends McpAdapterBase {
     public async readResourceAsync(uri: string): Promise<McpResourceContent | undefined> {
         let text: string | undefined = undefined;
         if (uri === `${McpCameraResourceUriPrefix}`) {
-            // List resource: enumerate all cameras currently in the scene.
-            const cameras = this._scene.cameras.map((camera) => ({
-                uri: this._buildUriForCamera(camera),
+            // List resource: enumerate cameras from the index (respects filter).
+            const cameras = Array.from(this._indexedCameras.entries()).map(([camUri, camera]) => ({
+                uri: camUri,
                 name: camera.name,
                 type: camera.getClassName(),
             }));
@@ -844,9 +848,16 @@ export class McpCameraAdapter extends McpAdapterBase {
      * Called once at construction time before subscribing to add/remove observables,
      * so cameras that exist before the adapter is created are not missed.
      */
+    private _isCameraAccepted(camera: Camera): boolean {
+        if (this._cameraFilter && !this._cameraFilter.has(camera)) return false;
+        return this._isResourceAccepted(this._buildUriForCamera(camera));
+    }
+
     protected _initializeCameraIndex(): void {
         this._scene.cameras.forEach((camera) => {
-            this._indexedCameras.set(this._buildUriForCamera(camera), camera);
+            if (this._isCameraAccepted(camera)) {
+                this._indexedCameras.set(this._buildUriForCamera(camera), camera);
+            }
         });
     }
 
@@ -857,6 +868,7 @@ export class McpCameraAdapter extends McpAdapterBase {
 
     /** Called when a new camera is added to the scene; adds it to the index and notifies subscribers. */
     protected _onCameraAdded(eventData: Camera, _eventState: EventState) {
+        if (!this._isCameraAccepted(eventData)) return;
         const uri = this._buildUriForCamera(eventData);
         this._indexedCameras.set(uri, eventData);
         this._forwardResourceChanged();

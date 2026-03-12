@@ -25,6 +25,7 @@ export class WsTunnelBuilder {
     private _port = 3000;
     private _host: string | undefined;
     private _providerPath = "/provider";
+    private _providersPath = "/providers";
     private _clientPath = "/";
     private _ssePath = "/sse";
     private _messagesPath = "/messages";
@@ -54,6 +55,16 @@ export class WsTunnelBuilder {
      */
     withProviderPath(path: string): this {
         this._providerPath = path;
+        return this;
+    }
+
+    /**
+     * Sets the URL path for multiplexed provider connections.
+     * Multiple providers share a single WebSocket using the envelope protocol.
+     * @default "/providers"
+     */
+    withProvidersPath(path: string): this {
+        this._providersPath = path;
         return this;
     }
 
@@ -146,6 +157,7 @@ export class WsTunnelBuilder {
             port: this._port,
             host: this._host,
             providerPath: this._providerPath,
+            providersPath: this._providersPath,
             clientPath: this._clientPath,
             ssePath: this._ssePath,
             messagesPath: this._messagesPath,

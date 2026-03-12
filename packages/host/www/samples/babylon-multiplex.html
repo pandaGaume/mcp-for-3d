@@ -1,0 +1,502 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>MCP Babylon — Multiplex Robots</title>
+        <link rel="stylesheet" href="css/sample.css" />
+        <style>
+            /* Viewport labels overlaid on the canvas */
+            .viewport-labels {
+                position: absolute;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                pointer-events: none;
+                z-index: 1;
+            }
+            .viewport-label {
+                position: absolute;
+                font-family: var(--mono);
+                font-size: 0.7rem;
+                font-weight: 700;
+                letter-spacing: 0.06em;
+                text-transform: uppercase;
+                color: var(--text);
+                background: rgba(30, 30, 46, 0.7);
+                padding: 3px 10px;
+                border-radius: 0 0 6px 0;
+            }
+            .viewport-label.top-right  { border-radius: 0 0 0 6px; }
+            .viewport-label.bot-left   { border-radius: 0 6px 0 0; }
+            .viewport-label.bot-right  { border-radius: 6px 0 0 0; }
+
+            /* Viewport grid borders */
+            .viewport-borders {
+                position: absolute;
+                top: 0; left: 0;
+                width: 100%; height: 100%;
+                pointer-events: none;
+                z-index: 1;
+            }
+            .viewport-borders .vb-h {
+                position: absolute;
+                left: 0; right: 0;
+                top: 50%;
+                height: 1px;
+                background: var(--muted);
+            }
+            .viewport-borders .vb-v {
+                position: absolute;
+                top: 0; bottom: 0;
+                left: 50%;
+                width: 1px;
+                background: var(--muted);
+            }
+
+            /* Copy button next to endpoint URLs */
+            .endpoint-row {
+                display: flex;
+                gap: 6px;
+                align-items: center;
+            }
+            .endpoint-row input { flex: 1; }
+            .copy-btn {
+                background: var(--surface);
+                border: 1px solid var(--border);
+                border-radius: 4px;
+                color: var(--muted);
+                cursor: pointer;
+                font-size: 0.72rem;
+                padding: 4px 7px;
+                flex-shrink: 0;
+                transition: color 0.15s, border-color 0.15s;
+            }
+            .copy-btn:hover { color: var(--text); border-color: var(--text); }
+            .copy-btn.copied { color: var(--green); border-color: var(--green); }
+        </style>
+    </head>
+    <body>
+        <header>
+            <h1 id="page-title">MCP Babylon — Multiplex Robots</h1>
+            <span id="status-badge" class="badge disconnected">Disconnected</span>
+        </header>
+
+        <div class="layout">
+            <!-- Left panel: connection -->
+            <aside class="left-panel panel">
+                <div class="panel-title">Connection</div>
+                <div class="panel-body">
+                    <div class="field">
+                        <label for="ws-url">Tunnel multiplex URL</label>
+                        <input type="text" id="ws-url" value="" />
+                    </div>
+                    <div class="btn-row">
+                        <button id="start-btn">&#9654; Start</button>
+                        <button id="stop-btn" disabled>&#9632; Stop</button>
+                    </div>
+                    <div id="endpoint-list" style="margin-top: 14px"></div>
+                </div>
+            </aside>
+
+            <!-- Right column -->
+            <div class="right-column">
+                <!-- Top: Babylon scene with viewport labels -->
+                <div class="scene-panel">
+                    <canvas id="renderCanvas"></canvas>
+                    <div class="viewport-borders">
+                        <div class="vb-h"></div>
+                        <div class="vb-v"></div>
+                    </div>
+                    <div class="viewport-labels">
+                        <div class="viewport-label" style="top:0; left:0">robot_1</div>
+                        <div class="viewport-label top-right" style="top:0; right:0">robot_2</div>
+                        <div class="viewport-label bot-left" style="bottom:0; left:0">robot_3</div>
+                        <div class="viewport-label bot-right" style="bottom:0; right:0">robot_4</div>
+                    </div>
+                </div>
+
+                <!-- Console -->
+                <section class="console-panel panel">
+                    <div class="panel-title">Console</div>
+                    <div class="panel-body" id="console-output"></div>
+                </section>
+            </div>
+        </div>
+
+        <!-- Babylon.js core (CDN) -->
+        <script src="https://cdn.babylonjs.com/babylon.js"></script>
+
+        <!-- MCP bundles -->
+        <script src="/bundle/mcp-core.js"></script>
+        <script src="/bundle/mcp-server.js"></script>
+        <script src="/bundle/mcp-babylon.js"></script>
+
+        <script>
+            "use strict";
+
+            // =========================================================
+            // Derive multiplex WS URL from the current page origin
+            // =========================================================
+            (function () {
+                const wsScheme = window.location.protocol === "https:" ? "wss:" : "ws:";
+                document.getElementById("ws-url").value = `${wsScheme}//${window.location.host}/providers`;
+            })();
+
+            // =========================================================
+            // Console helpers
+            // =========================================================
+            const consoleEl = document.getElementById("console-output");
+
+            function log(msg, level = "info") {
+                const ts = new Date().toLocaleTimeString("en", {
+                    hour12: false,
+                    hour: "2-digit",
+                    minute: "2-digit",
+                    second: "2-digit",
+                });
+                const div = document.createElement("div");
+                div.className = `log-line ${level}`;
+                div.innerHTML = `<span class="ts">${ts}</span>  <span class="msg">${escHtml(msg)}</span>`;
+                consoleEl.appendChild(div);
+                consoleEl.scrollTop = consoleEl.scrollHeight;
+            }
+
+            function escHtml(s) {
+                return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+            }
+
+            // =========================================================
+            // Status badge
+            // =========================================================
+            const badgeEl = document.getElementById("status-badge");
+
+            function setStatus(state) {
+                badgeEl.className = `badge ${state}`;
+                badgeEl.textContent =
+                    {
+                        disconnected: "Disconnected",
+                        connecting: "Connecting\u2026",
+                        connected: "Connected",
+                    }[state] ?? state;
+            }
+
+            // =========================================================
+            // Babylon.js engine + scene
+            // =========================================================
+            const canvas = document.getElementById("renderCanvas");
+            const engine = new BABYLON.Engine(canvas, true, {
+                preserveDrawingBuffer: true,
+                stencil: true,
+            });
+            const scene = new BABYLON.Scene(engine);
+
+            // =========================================================
+            // Robot definitions
+            // =========================================================
+            const ROBOT_DEFS = [
+                { name: "robot_1", pos: new BABYLON.Vector3(-4, 0, -4), color: new BABYLON.Color3(0.9, 0.25, 0.25) },
+                { name: "robot_2", pos: new BABYLON.Vector3( 4, 0, -4), color: new BABYLON.Color3(0.25, 0.8, 0.3)  },
+                { name: "robot_3", pos: new BABYLON.Vector3(-4, 0,  4), color: new BABYLON.Color3(0.25, 0.5, 0.95) },
+                { name: "robot_4", pos: new BABYLON.Vector3( 4, 0,  4), color: new BABYLON.Color3(0.9, 0.7, 0.1)  },
+            ];
+
+            // Viewport layout: 2x2 grid
+            const VIEWPORTS = [
+                { x: 0,   y: 0.5, w: 0.5, h: 0.5 }, // top-left     = robot_1
+                { x: 0.5, y: 0.5, w: 0.5, h: 0.5 }, // top-right    = robot_2
+                { x: 0,   y: 0,   w: 0.5, h: 0.5 }, // bottom-left  = robot_3
+                { x: 0.5, y: 0,   w: 0.5, h: 0.5 }, // bottom-right = robot_4
+            ];
+
+            /**
+             * Builds a simple robot mesh: a body box, a head sphere, and two
+             * arm boxes. Returns the root transform node.
+             */
+            function buildRobot(name, pos, color, scene) {
+                const root = new BABYLON.TransformNode(name, scene);
+                root.position = pos;
+
+                const mat = new BABYLON.StandardMaterial(name + "_mat", scene);
+                mat.diffuseColor = color;
+                mat.specularColor = color.scale(0.3);
+
+                // Body
+                const body = BABYLON.MeshBuilder.CreateBox(name + "_body", { width: 1, height: 1.4, depth: 0.6 }, scene);
+                body.position.y = 1.7;
+                body.material = mat;
+                body.parent = root;
+
+                // Head
+                const head = BABYLON.MeshBuilder.CreateSphere(name + "_head", { diameter: 0.7, segments: 12 }, scene);
+                head.position.y = 2.85;
+                head.material = mat;
+                head.parent = root;
+
+                // Left arm
+                const lArm = BABYLON.MeshBuilder.CreateBox(name + "_armL", { width: 0.3, height: 1.0, depth: 0.3 }, scene);
+                lArm.position.set(-0.65, 1.7, 0);
+                lArm.material = mat;
+                lArm.parent = root;
+
+                // Right arm
+                const rArm = BABYLON.MeshBuilder.CreateBox(name + "_armR", { width: 0.3, height: 1.0, depth: 0.3 }, scene);
+                rArm.position.set(0.65, 1.7, 0);
+                rArm.material = mat;
+                rArm.parent = root;
+
+                // Legs
+                const lLeg = BABYLON.MeshBuilder.CreateBox(name + "_legL", { width: 0.35, height: 1.0, depth: 0.35 }, scene);
+                lLeg.position.set(-0.25, 0.5, 0);
+                lLeg.material = mat;
+                lLeg.parent = root;
+
+                const rLeg = BABYLON.MeshBuilder.CreateBox(name + "_legR", { width: 0.35, height: 1.0, depth: 0.35 }, scene);
+                rLeg.position.set(0.25, 0.5, 0);
+                rLeg.material = mat;
+                rLeg.parent = root;
+
+                return root;
+            }
+
+            /**
+             * Creates a TargetCamera for a robot, positioned behind and above
+             * it, looking at the robot's head.
+             */
+            function createRobotCamera(name, robotPos, vp, scene) {
+                const target = robotPos.add(new BABYLON.Vector3(0, 2, 0));
+                const camPos = robotPos.add(new BABYLON.Vector3(0, 4, -6));
+
+                const cam = new BABYLON.ArcRotateCamera(
+                    name + "_cam",
+                    Math.PI / 2,                                            // alpha
+                    Math.acos(2 / camPos.subtract(target).length()),        // beta
+                    camPos.subtract(target).length(),                       // radius
+                    target,
+                    scene,
+                );
+                cam.viewport = new BABYLON.Viewport(vp.x, vp.y, vp.w, vp.h);
+                // Do NOT call attachControl here — we manage input per-viewport below.
+                return cam;
+            }
+
+            /**
+             * Robot object implementing IHasMcpServers.
+             * Each robot holds a reference to its MCP server(s).
+             */
+            class Robot {
+                constructor(name, mesh, camera) {
+                    this.name = name;
+                    this.mesh = mesh;
+                    this.camera = camera;
+                    /** @type {import('@dev/core').IMcpServer[]} */
+                    this.McpServer = []; // IHasMcpServers
+                }
+            }
+
+            // =========================================================
+            // Build the scene
+            // =========================================================
+            function createScene(scene) {
+                // Lighting
+                const hemi = new BABYLON.HemisphericLight("hemi", new BABYLON.Vector3(0, 1, 0), scene);
+                hemi.intensity = 0.6;
+
+                const sun = new BABYLON.DirectionalLight("sun", new BABYLON.Vector3(-1, -2, -1).normalize(), scene);
+                sun.intensity = 0.7;
+
+                // Ground
+                const ground = BABYLON.MeshBuilder.CreateGround("ground", { width: 20, height: 20 }, scene);
+                const gMat = new BABYLON.StandardMaterial("groundMat", scene);
+                gMat.diffuseColor = new BABYLON.Color3(0.13, 0.13, 0.2);
+                gMat.specularColor = BABYLON.Color3.Black();
+                ground.material = gMat;
+
+                // A few decorative obstacles in the middle
+                for (let i = 0; i < 5; i++) {
+                    const box = BABYLON.MeshBuilder.CreateBox("obstacle_" + i, {
+                        width: 0.6 + Math.random() * 0.8,
+                        height: 0.5 + Math.random() * 1.5,
+                        depth: 0.6 + Math.random() * 0.8,
+                    }, scene);
+                    box.position.set(
+                        (Math.random() - 0.5) * 4,
+                        box.scaling.y * 0.5,
+                        (Math.random() - 0.5) * 4,
+                    );
+                    const bMat = new BABYLON.StandardMaterial("obsMat_" + i, scene);
+                    bMat.diffuseColor = new BABYLON.Color3(0.3, 0.3, 0.4);
+                    bMat.specularColor = BABYLON.Color3.Black();
+                    box.material = bMat;
+                }
+            }
+
+            createScene(scene);
+
+            // Build robots and their cameras
+            const robots = ROBOT_DEFS.map((def, i) => {
+                const mesh = buildRobot(def.name, def.pos, def.color, scene);
+                const cam = createRobotCamera(def.name, def.pos, VIEWPORTS[i], scene);
+                log(`${def.name}: pos (${def.pos.x}, ${def.pos.y}, ${def.pos.z}), camera "${cam.name}"`, "dim");
+                return new Robot(def.name, mesh, cam);
+            });
+
+            // Activate all cameras (multi-viewport rendering)
+            scene.activeCameras = robots.map((r) => r.camera);
+
+            // ── Viewport-aware camera input ──────────────────────────
+            // Only the camera whose viewport quadrant contains the
+            // pointer receives input events.
+            let activeCamera = null;
+
+            function getCameraUnderPointer(evt) {
+                const rect = canvas.getBoundingClientRect();
+                const nx = (evt.clientX - rect.left) / rect.width;   // 0..1
+                const ny = 1 - (evt.clientY - rect.top) / rect.height; // 0..1 (bottom=0)
+
+                for (const robot of robots) {
+                    const vp = robot.camera.viewport;
+                    if (nx >= vp.x && nx < vp.x + vp.width &&
+                        ny >= vp.y && ny < vp.y + vp.height) {
+                        return robot.camera;
+                    }
+                }
+                return null;
+            }
+
+            canvas.addEventListener("pointermove", (evt) => {
+                const cam = getCameraUnderPointer(evt);
+                if (cam && cam !== activeCamera) {
+                    if (activeCamera) activeCamera.detachControl();
+                    cam.attachControl(canvas, true);
+                    activeCamera = cam;
+                }
+            });
+
+            canvas.addEventListener("pointerleave", () => {
+                if (activeCamera) {
+                    activeCamera.detachControl();
+                    activeCamera = null;
+                }
+            });
+
+            engine.runRenderLoop(() => scene.render());
+            window.addEventListener("resize", () => engine.resize());
+
+            // =========================================================
+            // MCP server lifecycle — one server per robot, multiplexed
+            // =========================================================
+            const { McpServerBuilder, MultiplexTransport } = window.McpServer;
+            const { McpCameraAdapter, McpCameraBehavior } = window.McpBabylon;
+
+            let servers = [];
+
+            document.getElementById("start-btn").addEventListener("click", async () => {
+                const wsUrl = document.getElementById("ws-url").value.trim().replace(/\/$/, "");
+                const endpointListEl = document.getElementById("endpoint-list");
+                endpointListEl.innerHTML = "";
+
+                log(`Connecting ${robots.length} robots via multiplex to ${wsUrl} \u2026`, "dim");
+                setStatus("connecting");
+
+                try {
+                    for (const robot of robots) {
+                        // Create a multiplexed transport — all share the same WebSocket
+                        const transport = MultiplexTransport.create(robot.name, wsUrl);
+
+                        // Build a per-robot MCP server with its own camera behavior
+                        const adapter = new McpCameraAdapter(scene, robot.camera);
+                        const behavior = new McpCameraBehavior(adapter);
+
+                        const server = new McpServerBuilder()
+                            .withName(robot.name)
+                            .withTransport(transport)
+                            .withInitializer({
+                                initialize(_clientInfo, _caps) {
+                                    return {
+                                        protocolVersion: "2024-11-05",
+                                        serverInfo: { name: robot.name, version: "1.0.0" },
+                                        instructions:
+                                            `You are connected to ${robot.name}'s camera in a multi-robot scene. ` +
+                                            "ALWAYS use MCP tools and resources \u2014 do NOT write or suggest any code. " +
+                                            `\n\nSCENE: 4 robots (robot_1..robot_4) on a dark ground plane with obstacles. ` +
+                                            `This server controls ONLY ${robot.name}'s camera. ` +
+                                            `\n\nCAMERA RESOURCES: Read 'babylon://camera' to list cameras, ` +
+                                            `read 'babylon://camera/{cameraId}' for full state. ` +
+                                            "\n\nTOOL ROUTING: every tool requires the 'uri' argument. " +
+                                            "Read 'babylon://camera' first to obtain exact URIs. " +
+                                            "\n\nCOORDINATES: left-handed Y-up.",
+                                    };
+                                },
+                            })
+                            .register(behavior)
+                            .build();
+
+                        await server.start();
+
+                        // Implement IHasMcpServers
+                        robot.McpServer = [server];
+                        servers.push(server);
+
+                        // Show MCP endpoint in the left panel
+                        const httpBase = wsUrl
+                            .replace(/^ws(s?):\/\//, "http$1://")
+                            .replace(/\/providers$/, "");
+                        const mcpUrl = `${httpBase}/${encodeURIComponent(robot.name)}/mcp`;
+
+                        const div = document.createElement("div");
+                        div.className = "field";
+                        div.innerHTML =
+                            `<label>${escHtml(robot.name)}</label>` +
+                            `<div class="endpoint-row">` +
+                            `<input type="text" readonly value="${escHtml(mcpUrl)}" ` +
+                            `style="color: var(--green); cursor: text; font-size: 0.72rem" />` +
+                            `<button class="copy-btn" title="Copy URL">&#x2398;</button>` +
+                            `</div>`;
+                        div.querySelector(".copy-btn").addEventListener("click", (e) => {
+                            navigator.clipboard.writeText(mcpUrl).then(() => {
+                                e.target.textContent = "\u2713";
+                                e.target.classList.add("copied");
+                                setTimeout(() => { e.target.innerHTML = "&#x2398;"; e.target.classList.remove("copied"); }, 1500);
+                            });
+                        });
+                        endpointListEl.appendChild(div);
+
+                        log(`${robot.name} \u2014 connected (${mcpUrl})`, "ok");
+                    }
+
+                    setStatus("connected");
+                    log(`All ${robots.length} robots connected via a single WebSocket.`, "ok");
+
+                    document.getElementById("start-btn").disabled = true;
+                    document.getElementById("stop-btn").disabled = false;
+                } catch (err) {
+                    setStatus("disconnected");
+                    log(`Failed: ${err}`, "error");
+                    // Clean up any that started
+                    for (const s of servers) {
+                        try { await s.stop(); } catch { /* */ }
+                    }
+                    servers = [];
+                }
+            });
+
+            document.getElementById("stop-btn").addEventListener("click", async () => {
+                for (const s of servers) {
+                    try { await s.stop(); } catch (err) { log(`Stop error: ${err}`, "error"); }
+                }
+                servers = [];
+                for (const robot of robots) robot.McpServer = [];
+
+                setStatus("disconnected");
+                document.getElementById("start-btn").disabled = false;
+                document.getElementById("stop-btn").disabled = true;
+                document.getElementById("endpoint-list").innerHTML = "";
+                log("All servers stopped.", "warn");
+            });
+
+            log("Ready. Press \u25b6 Start to connect all 4 robots via multiplex.", "dim");
+        </script>
+    </body>
+</html>

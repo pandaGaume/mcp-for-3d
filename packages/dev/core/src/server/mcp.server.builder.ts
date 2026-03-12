@@ -1,4 +1,4 @@
-import type { IMcpBehavior, IMcpInitializer, IMcpServer, IMcpServerBuilder, IMcpServerHandlers, IMcpServerOptions, McpGrammarResolver } from "../interfaces";
+import type { IMessageTransport, IMcpBehavior, IMcpInitializer, IMcpServer, IMcpServerBuilder, IMcpServerHandlers, IMcpServerOptions, McpGrammarResolver } from "../interfaces";
 import { McpGrammar } from "../mcp.grammar";
 import { McpServer } from "./mcp.server";
 
@@ -30,6 +30,7 @@ export class McpServerBuilder implements IMcpServerBuilder {
     private _options: IMcpServerOptions = {};
     private _grammars = new Map<string, McpGrammar>();
     private _grammarResolver: McpGrammarResolver | undefined;
+    private _transport: IMessageTransport | undefined;
 
     /** Sets the human-readable name reported in `initialize` responses. */
     withName(name: string): this {
@@ -105,13 +106,32 @@ export class McpServerBuilder implements IMcpServerBuilder {
     }
 
     /**
+     * Provides an external transport instead of the default {@link DirectTransport}.
+     * When set, `withWsUrl()` is no longer required — the transport manages its
+     * own connection lifecycle.
+     *
+     * @example
+     * ```typescript
+     * const transport = MultiplexTransport.create("scene", "ws://localhost:8080/providers");
+     * const server = new McpServerBuilder()
+     *     .withName("scene")
+     *     .withTransport(transport)
+     *     .build();
+     * ```
+     */
+    withTransport(transport: IMessageTransport): this {
+        this._transport = transport;
+        return this;
+    }
+
+    /**
      * Constructs and returns a configured {@link IMcpServer}.
-     * @throws {Error} if `withWsUrl()` was not called.
+     * @throws {Error} if neither `withWsUrl()` nor `withTransport()` was called.
      */
     build(): IMcpServer {
-        if (!this._wsUrl) throw new Error("McpServerBuilder: withWsUrl() is required before build()");
+        if (!this._wsUrl && !this._transport) throw new Error("McpServerBuilder: withWsUrl() or withTransport() is required before build()");
 
-        const server = new McpServer(this._name, this._wsUrl, this._options, this._initializer, this._handlers, this._grammars, this._grammarResolver);
+        const server = new McpServer(this._name, this._wsUrl, this._options, this._initializer, this._handlers, this._grammars, this._grammarResolver, this._transport);
 
         for (const behavior of this._behaviors) {
             server.register(behavior);

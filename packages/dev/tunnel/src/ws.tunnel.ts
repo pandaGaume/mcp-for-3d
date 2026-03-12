@@ -96,6 +96,14 @@ export interface WsTunnelOptions {
     providerPath?: string;
 
     /**
+     * URL path for **multiplexed** provider connections.
+     * A single WebSocket carries traffic for multiple providers using the
+     * envelope protocol `{ provider: string, payload: object }`.
+     * @default "/providers"
+     */
+    providersPath?: string;
+
+    /**
      * URL path raw WebSocket MCP clients connect to.
      * @default "/"
      */
@@ -187,6 +195,9 @@ export class WsTunnel {
      */
     private readonly _providers = new Map<string, ProviderState>();
 
+    /** Maps a multiplexed WebSocket to the set of provider names it feeds. */
+    private readonly _multiplexSockets = new Map<WebSocket, Set<string>>();
+
     constructor(options: WsTunnelOptions) {
         this._options = options;
     }
@@ -236,10 +247,14 @@ export class WsTunnel {
             this._wss = new WebSocketServer({ server: this._httpServer, perMessageDeflate: false });
 
             this._wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
-                const url          = req.url ?? "/";
-                const providerPath = this._options.providerPath ?? "/provider";
+                const url           = req.url ?? "/";
+                const providerPath  = this._options.providerPath  ?? "/provider";
+                const providersPath = this._options.providersPath ?? "/providers";
 
-                if (url.startsWith(providerPath + "/") || url === providerPath) {
+                if (url === providersPath || url.startsWith(providersPath + "?")) {
+                    // Multiplexed provider: one WebSocket carries N providers via envelopes.
+                    this._onMultiplexProviderConnect(ws);
+                } else if (url.startsWith(providerPath + "/") || url === providerPath) {
                     // Extract name: everything after "<providerPath>/"
                     const raw  = url.slice(providerPath.length).replace(/^\//, "");
                     const name = decodeURIComponent(raw.split("?")[0]) || "(unnamed)";
@@ -271,6 +286,7 @@ export class WsTunnel {
                 state.ws?.close();
             }
             this._providers.clear();
+            this._multiplexSockets.clear();
             this._wss?.close();
             this._httpServer?.close((err) => (err ? reject(err) : resolve()));
         });
@@ -399,7 +415,7 @@ export class WsTunnel {
             } catch { /* malformed — forward anyway */ }
 
             if (state.ws?.readyState === WebSocket.OPEN) {
-                state.ws.send(body);
+                this._sendToProvider(state, providerName, body);
             } else {
                 const sseRes = state.sseSessions.get(sessionId);
                 if (sseRes) {
@@ -453,7 +469,7 @@ export class WsTunnel {
                 res.end();
             }
 
-            state.ws.send(body);
+            this._sendToProvider(state, providerName, body);
         });
     }
 
@@ -531,7 +547,7 @@ export class WsTunnel {
         const state = this._getOrCreateProviderState(providerName);
         state.wsClients.add(ws);
 
-        ws.on("message", (data: Buffer) => this._routeFromClient(ws, state, data.toString()));
+        ws.on("message", (data: Buffer) => this._routeFromClient(ws, state, providerName, data.toString()));
 
         ws.on("close", () => {
             state.wsClients.delete(ws);
@@ -541,18 +557,106 @@ export class WsTunnel {
         });
     }
 
+    /**
+     * Handles a multiplexed provider WebSocket (`/providers`).
+     * A single socket carries traffic for multiple providers using the
+     * envelope format `{ provider: string, payload: object }`.
+     * Provider names are registered lazily on first message.
+     */
+    private _onMultiplexProviderConnect(ws: WebSocket): void {
+        const providerNames = new Set<string>();
+        this._multiplexSockets.set(ws, providerNames);
+
+        ws.on("message", (data: Buffer) => {
+            let envelope: { provider?: string; payload?: unknown };
+            try {
+                envelope = JSON.parse(data.toString()) as { provider?: string; payload?: unknown };
+            } catch {
+                return; // malformed — drop
+            }
+
+            const name = envelope.provider;
+            if (!name || envelope.payload === undefined) return;
+
+            // Register provider name lazily on first encounter.
+            if (!providerNames.has(name)) {
+                const existing = this._providers.get(name);
+                if (existing?.ws?.readyState === WebSocket.OPEN) {
+                    // Provider already connected via another socket — reject this name.
+                    ws.send(JSON.stringify({
+                        provider: name,
+                        payload: {
+                            jsonrpc: "2.0", id: null,
+                            error: { code: -32000, message: `Provider "${name}" is already connected` },
+                        },
+                    }));
+                    return;
+                }
+                providerNames.add(name);
+                const state = this._getOrCreateProviderState(name);
+                state.ws = ws;
+            }
+
+            const state = this._providers.get(name)!;
+            this._routeFromProvider(state, JSON.stringify(envelope.payload));
+        });
+
+        ws.on("close", () => {
+            for (const name of providerNames) {
+                const state = this._providers.get(name);
+                if (state && state.ws === ws) {
+                    state.ws = null;
+                    // Notify pending sinks that the provider is gone.
+                    const error = JSON.stringify({
+                        jsonrpc: "2.0", id: null,
+                        error: { code: -32000, message: `Provider "${name}" disconnected` },
+                    });
+                    for (const sink of state.pending.values()) {
+                        if (sink.type === "ws" && sink.socket.readyState === WebSocket.OPEN) {
+                            sink.socket.send(error);
+                        } else if (sink.type === "sse") {
+                            const sseRes = state.sseSessions.get(sink.sessionId);
+                            if (sseRes) this._sendSseEvent(sseRes, error);
+                        } else if (sink.type === "http") {
+                            sink.res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+                            sink.res.end(error);
+                        }
+                    }
+                    state.pending.clear();
+                }
+            }
+            this._multiplexSockets.delete(ws);
+        });
+    }
+
     // -------------------------------------------------------------------------
     // Message routing
     // -------------------------------------------------------------------------
 
-    private _routeFromClient(client: WebSocket, state: ProviderState, data: string): void {
+    /**
+     * Sends a raw JSON-RPC message to a provider, wrapping it in a multiplex
+     * envelope when the provider's WebSocket is a multiplexed connection.
+     */
+    private _sendToProvider(state: ProviderState, providerName: string, data: string): void {
+        if (!state.ws || state.ws.readyState !== WebSocket.OPEN) return;
+
+        if (this._multiplexSockets.has(state.ws)) {
+            // Wrap in envelope for the multiplexed socket.
+            const payload = JSON.parse(data) as unknown;
+            state.ws.send(JSON.stringify({ provider: providerName, payload }));
+        } else {
+            state.ws.send(data);
+        }
+    }
+
+    private _routeFromClient(client: WebSocket, state: ProviderState, providerName: string, data: string): void {
         try {
             const msg = JSON.parse(data) as { id?: string | number };
             if (msg?.id != null) state.pending.set(msg.id, { type: "ws", socket: client });
         } catch { /* forward as-is */ }
 
         if (state.ws?.readyState === WebSocket.OPEN) {
-            state.ws.send(data);
+            this._sendToProvider(state, providerName, data);
         } else {
             client.send(JSON.stringify({
                 jsonrpc: "2.0", id: null,
