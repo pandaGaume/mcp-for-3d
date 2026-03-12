@@ -14,7 +14,8 @@ deployment scenario.
 ```
 McpServer  ──>  IMessageTransport
                     ├── DirectTransport      (1 server : 1 WebSocket)
-                    └── MultiplexTransport   (N servers : 1 WebSocket)
+                    ├── MultiplexTransport   (N servers : 1 WebSocket)
+                    └── LoopbackTransport    (in-process, no network)
 ```
 
 | Transport            | Use case                                | WebSocket path     |
@@ -126,9 +127,34 @@ interface IMessageTransport {
 ```
 
 Custom transports can be implemented for scenarios not covered by the built-in
-ones (e.g. an in-process transport for testing, or a `BroadcastChannel`
-transport for cross-tab communication). Pass them to the builder via
-`withTransport()`.
+ones (e.g. a `BroadcastChannel` transport for cross-tab communication). Pass
+them to the builder via `withTransport()`.
+
+---
+
+## LoopbackTransport
+
+An in-process transport pair for same-page server↔client communication. Messages
+are delivered via `queueMicrotask` — near-zero latency, no network. Primarily
+used with `McpClient` for robot-to-robot communication in swarm scenarios.
+
+```typescript
+const [serverEnd, clientEnd] = LoopbackTransport.createPair();
+
+// Server side
+const server = new McpServerBuilder()
+    .withName("robot_1")
+    .withTransport(serverEnd)
+    .register(behavior)
+    .build();
+await server.start();
+
+// Client side
+const client = new McpClient({ name: "robot_2", version: "1.0.0" }, clientEnd);
+await client.connect();
+```
+
+See [client.md](./client.md) for full usage details.
 
 ---
 

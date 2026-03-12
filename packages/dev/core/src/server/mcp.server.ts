@@ -413,12 +413,13 @@ export class McpServer implements IMcpServer, IMcpServerHandlers {
                 void this._handleMessage(data);
             };
 
-            // DirectTransport requires an explicit connect().
-            // MultiplexTransport requires activate() to register with the shared socket.
-            if (transport instanceof DirectTransport) {
-                transport.connect();
-            } else if (transport instanceof MultiplexTransport) {
+            // Activate or connect the transport depending on its type.
+            // MultiplexTransport uses activate(); all others (DirectTransport,
+            // LoopbackTransport, custom) use connect().
+            if (transport instanceof MultiplexTransport) {
                 transport.activate();
+            } else if ("connect" in transport && typeof (transport as { connect: unknown }).connect === "function") {
+                (transport as { connect(): void }).connect();
             }
         });
     }
