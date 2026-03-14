@@ -1,9 +1,9 @@
-# MCP for Babylon
+# MCP Browser World
 
-A **Model Context Protocol (MCP)** framework that bridges LLM agents to 3D engines.
-It exposes scene objects (cameras, lights, meshes) as MCP resources and tools,
-letting clients like **Claude Code** or **MCP Inspector** inspect and manipulate
-a live 3D scene through a standard JSON-RPC interface.
+A **Model Context Protocol (MCP)** framework that bridges LLM agents to browser-based
+3D engines. It exposes scene objects (cameras, lights, meshes) as MCP resources and
+tools, letting clients like **Claude Code** or **MCP Inspector** inspect and
+manipulate a live 3D scene through a standard JSON-RPC interface.
 
 The framework is engine-agnostic at its core and ships with adapters for
 **Babylon.js** and **CesiumJS**.
@@ -18,8 +18,8 @@ The framework is engine-agnostic at its core and ships with adapters for
 
 ```bash
 # 1. Clone & install
-git clone https://github.com/pandaGaume/mcp-for-babylon.git
-cd mcp-for-babylon
+git clone https://github.com/pandaGaume/mcp-browser-world.git
+cd mcp-browser-world
 npm install
 
 # 2. Build everything (TypeScript → UMD bundles → deploy)
@@ -350,7 +350,7 @@ The framework ships with three behaviors, each documented in detail:
 ## Project structure
 
 ```
-mcp-for-babylon/
+mcp-browser-world/
 ├── packages/
 │   ├── dev/
 │   │   ├── core/           @dev/core — MCP server SDK

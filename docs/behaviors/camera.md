@@ -1,7 +1,8 @@
 # Camera Behavior
 
-The camera behavior (`McpCameraBehavior`) exposes 19 tools for controlling cameras
-in a 3D scene — positioning, projection, animation, and scene queries.
+The camera behavior (`McpCameraBehavior`) exposes 20 tools for controlling cameras
+in a 3D scene — positioning, projection, animation, snapshot capture with image
+filtering, and scene queries.
 
 **Package:** `@dev/behaviors`
 **Namespace:** `camera`
@@ -187,15 +188,50 @@ Re-attaches user input to the camera, restoring interactive control.
 
 Captures a screenshot from the camera's point of view and returns it as a
 base64-encoded PNG. Renders off-screen at any resolution, independent of the
-canvas size.
+canvas size. Optionally applies registered image filters before encoding.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `uri` | string | yes | Camera URI |
 | `size` | object | no | `{ width?, height?, precision? }` |
+| `filters` | string[] | no | Filter names to apply after capture |
 
 Specify `width` + `height` for explicit pixel resolution, or `precision` to scale
 relative to the current viewport (1.0 = native).
+
+**`filters` parameter behaviour:**
+
+| Value | Effect |
+|-------|--------|
+| _(omitted)_ | Raw capture, no filters applied |
+| `[]` | Skip all filters (same as omitted) |
+| `["retinex", "grayscale"]` | Apply only the named filters, in registration order |
+
+Use `camera_list_filters` to discover available filter names at runtime.
+
+> **Note:** The `filters` parameter is only available when the camera adapter
+> implements `IHasImageFiltering` (from `@dev/filters`). If no filters are
+> registered, the parameter is accepted but has no effect.
+
+### camera_list_filters
+
+Lists all registered snapshot filters with their names and descriptions. This
+tool is only advertised when the camera adapter implements `IHasImageFiltering`.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `uri` | string | yes | Camera URI |
+
+**Returns:**
+
+```jsonc
+{
+    "filters": [
+        { "name": "grayscale", "description": "Converts the image to grayscale" },
+        { "name": "retinex",   "description": "Multi-scale retinex with colour restoration" }
+    ]
+}
+```
 
 ---
 
