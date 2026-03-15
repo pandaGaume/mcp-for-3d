@@ -1,4 +1,4 @@
-import { IImageFilterSet, ISnapshotFilter, isWorkerSnapshotFilter, IWorkerSnapshotFilter } from "./interfaces";
+import { IImageFilterSet, ISnapshotFilter, isTextSnapshotFilter, isWorkerSnapshotFilter, IWorkerSnapshotFilter } from "./interfaces";
 import { SnapshotFilterWorkerPool } from "./snapshot.filterWorkerPool";
 
 /**
@@ -40,6 +40,10 @@ export class ImageFilterSet implements IImageFilterSet {
 
     public getFilterDescriptions(): ReadonlyArray<{ name: string; description: string }> {
         return this._filters.map((f) => ({ name: f.name, description: f.description ?? "" }));
+    }
+
+    public getFilter(name: string): ISnapshotFilter | undefined {
+        return this._filters.find((f) => f.name === name);
     }
 
     // ── Execution ─────────────────────────────────────────────────────────
@@ -95,6 +99,17 @@ export class ImageFilterSet implements IImageFilterSet {
             }
         }
         return result;
+    }
+
+    public async applyAsTextAsync(imageData: ImageData, filterName: string, context?: Record<string, unknown>): Promise<string> {
+        const filter = this._filters.find((f) => f.name === filterName);
+        if (!filter) {
+            throw new Error(`Unknown snapshot filter: "${filterName}"`);
+        }
+        if (!isTextSnapshotFilter(filter)) {
+            throw new Error(`Snapshot filter "${filterName}" is not a text filter.`);
+        }
+        return filter.renderToText(imageData, context);
     }
 
     // ── Encoding ──────────────────────────────────────────────────────────

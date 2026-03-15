@@ -43,9 +43,26 @@ export interface IImageFilterSet {
     applyFiltersAsync(imageData: ImageData, filterNames?: string[], context?: Record<string, unknown>): Promise<ImageData>;
 
     /**
+     * Runs a single {@link ITextSnapshotFilter} and returns its text output.
+     *
+     * @param imageData   Raw RGBA pixel buffer from the engine capture.
+     * @param filterName  Name of a registered {@link ITextSnapshotFilter}.
+     * @param context     Optional engine-specific objects passed to the filter.
+     * @returns           The text rendering produced by the filter.
+     * @throws            If the named filter does not exist or is not a text filter.
+     */
+    applyAsTextAsync(imageData: ImageData, filterName: string, context?: Record<string, unknown>): Promise<string>;
+
+    /**
      * Encodes an {@link ImageData} to a raw base64 PNG string (no `data:` prefix).
      */
     imageDataToBase64(imageData: ImageData): Promise<string>;
+
+    /**
+     * Returns the registered filter with the given name, or `undefined` if
+     * no filter with that name exists.
+     */
+    getFilter(name: string): ISnapshotFilter | undefined;
 
     /** Releases resources (terminates Worker, clears filter list). */
     dispose(): void;

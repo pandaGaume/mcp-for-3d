@@ -67,7 +67,7 @@ import {
     Viewer,
 } from "cesium";
 import { JsonRpcMimeType, McpAdapterBase, McpResourceContent, McpToolResult, McpToolResults, ToolSupport } from "@dev/core";
-import { IHasImageFiltering, IImageFilterSet, ImageFilterSet } from "@dev/filters";
+import { IHasImageFiltering, IImageFilterSet, ImageFilterSet, isTextSnapshotFilter } from "@dev/filters";
 import { ICameraState, IFrustum, IScenePickHit, IScenePickResult, ISceneVisibleObjectsState, IVisibleObjectState, McpCameraBehavior } from "@dev/behaviors";
 import { resolveToCartesian3 } from "@dev/geodesy";
 import { McpCesiumDomain, McpCameraResourceUriPrefix } from "../mcp.commons";
@@ -572,11 +572,28 @@ export class McpCameraAdapter extends McpAdapterBase implements IHasImageFilteri
                     }
                     const imageData = new ImageData(flipped, w, h);
 
+                    const ctx = { viewer: this._viewer, scene: this._scene };
+
+                    // Check if any requested filter is a text filter (e.g. ASCII).
+                    const textFilterEntry = filterNames
+                        .map((n) => this.imageFiltering.getFilter(n))
+                        .find((f) => f !== undefined && isTextSnapshotFilter(f));
+
+                    if (textFilterEntry) {
+                        // Run any non-text image filters first, then produce text.
+                        const imageFilterNames = filterNames.filter((n) => {
+                            const f = this.imageFiltering.getFilter(n);
+                            return f !== undefined && !isTextSnapshotFilter(f);
+                        });
+                        const filtered = imageFilterNames.length > 0
+                            ? await this.imageFiltering.applyFiltersAsync(imageData, imageFilterNames, ctx)
+                            : imageData;
+                        const text = await this.imageFiltering.applyAsTextAsync(filtered, textFilterEntry.name, ctx);
+                        return McpToolResults.text(text);
+                    }
+
                     // Run the snapshot filter pipeline on raw pixels.
-                    const filtered = await this.imageFiltering.applyFiltersAsync(imageData, filterNames, {
-                        viewer: this._viewer,
-                        scene: this._scene,
-                    });
+                    const filtered = await this.imageFiltering.applyFiltersAsync(imageData, filterNames, ctx);
 
                     // Single base64 encode at the very end.
                     const base64 = await this.imageFiltering.imageDataToBase64(filtered);
